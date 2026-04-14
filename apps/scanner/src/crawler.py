@@ -1,16 +1,28 @@
 """Playwright-based headless browser cookie crawler.
 
-For each URL: launches headless Chromium, clears cookies, navigates,
-waits for network idle, enumerates document.cookie / localStorage /
-sessionStorage, captures Set-Cookie headers from network requests,
-and attributes cookies to source scripts via the request chain.
+For each URL: launches headless Chromium, **pre-seeds an
+"all categories accepted" ConsentOS consent cookie**, clears any other
+cookies, navigates, waits for network idle, enumerates
+``document.cookie`` / ``localStorage`` / ``sessionStorage``, captures
+``Set-Cookie`` headers from network requests, and attributes cookies
+to source scripts via the request chain.
+
+The pre-seed is what makes the scan useful: without it the loader
+would block analytics/marketing scripts and the scan would only see
+strictly-necessary cookies, which tells you nothing about what the
+site actually loads in the post-consent state. Pre-consent compliance
+checks live in ``consent_validator.py`` and use a separate code path.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import time
+import uuid
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
+from datetime import UTC, datetime
+from urllib.parse import quote, urlparse
 
 from playwright.async_api import (
     BrowserContext,
@@ -21,6 +33,50 @@ from playwright.async_api import (
 )
 
 logger = logging.getLogger(__name__)
+
+# All ConsentOS categories — pre-seeded as accepted on every crawl so
+# the loader's "consent already given" branch fires and unblocks all
+# scripts/cookies.
+_ALL_CATEGORIES: list[str] = [
+    "necessary",
+    "functional",
+    "analytics",
+    "marketing",
+    "personalisation",
+]
+
+# Must match ``COOKIE_NAME`` in apps/banner/src/consent.ts. If you
+# rename it there, rename it here too.
+_CONSENT_COOKIE_NAME = "_consentos_consent"
+
+
+def _build_consent_cookie(url: str) -> dict:
+    """Return a Playwright cookie dict pre-seeding ConsentOS consent.
+
+    Mirrors the shape that ``apps/banner/src/consent.ts:writeConsent``
+    produces — URL-encoded JSON of a ``ConsentState`` — so the loader's
+    ``readConsent`` returns a valid object and short-circuits straight
+    to ``updateAcceptedCategories(...)``. Categories are hard-coded to
+    every known ConsentOS category; the scanner is a "what does this
+    site load when the visitor accepts everything?" tool, by design.
+    """
+    state = {
+        "visitorId": str(uuid.uuid4()),
+        "accepted": _ALL_CATEGORIES,
+        "rejected": [],
+        "consentedAt": datetime.now(UTC).isoformat(),
+        "bannerVersion": "scanner",
+    }
+    value = quote(json.dumps(state, separators=(",", ":")), safe="")
+    return {
+        "name": _CONSENT_COOKIE_NAME,
+        "value": value,
+        "url": url,
+        "path": "/",
+        "expires": time.time() + 365 * 86400,
+        "sameSite": "Lax",
+    }
+
 
 # Realistic Chrome UA so sites don't block the crawler as a bot.
 _DEFAULT_USER_AGENT = (
@@ -152,8 +208,13 @@ class CookieCrawler:
                 user_agent=self._user_agent,
                 ignore_https_errors=True,
             )
-            # Clear all cookies before visiting
+            # Start from a clean slate, then plant the ConsentOS consent
+            # cookie so the loader treats the visitor as having already
+            # accepted every category. Without this the scan only sees
+            # strictly-necessary cookies — useless for "what does this
+            # site actually load?" reporting.
             await context.clear_cookies()
+            await context.add_cookies([_build_consent_cookie(url)])
 
             page: Page = await context.new_page()
 
