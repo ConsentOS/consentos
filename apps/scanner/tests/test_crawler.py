@@ -8,10 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.crawler import (
+    _ALL_CATEGORIES,
+    _CONSENT_COOKIE_NAME,
     CookieCrawler,
     CrawlResult,
     DiscoveredCookie,
     SiteCrawlResult,
+    _build_consent_cookie,
     _build_initiator_chain,
     _get_script_initiator,
 )
@@ -438,3 +441,85 @@ class TestCrawlSite:
         await crawler.crawl_site(["https://example.com/"])
 
         browser.close.assert_awaited_once()
+
+
+# ── Consent pre-seed ────────────────────────────────────────────────────
+
+
+class TestBuildConsentCookie:
+    """The pre-seeded ``_consentos_consent`` cookie."""
+
+    def test_cookie_name_matches_loader(self):
+        cookie = _build_consent_cookie("https://example.com/")
+        assert cookie["name"] == _CONSENT_COOKIE_NAME == "_consentos_consent"
+
+    def test_cookie_is_url_scoped_for_playwright(self):
+        """``url`` lets Playwright derive domain / path / secure."""
+        cookie = _build_consent_cookie("https://example.com/page")
+        assert cookie["url"] == "https://example.com/page"
+        assert cookie["path"] == "/"
+
+    def test_cookie_value_decodes_to_consent_state_with_all_categories(self):
+        import json as _json
+        from urllib.parse import unquote
+
+        cookie = _build_consent_cookie("https://example.com/")
+        state = _json.loads(unquote(cookie["value"]))
+
+        assert sorted(state["accepted"]) == sorted(_ALL_CATEGORIES)
+        assert state["rejected"] == []
+        # ConsentState fields the loader's readConsent() relies on
+        assert "visitorId" in state
+        assert "consentedAt" in state
+        assert "bannerVersion" in state
+
+    def test_cookie_expires_far_in_future(self):
+        import time as _time
+
+        cookie = _build_consent_cookie("https://example.com/")
+        # ~1 year, allow generous slack for test timing
+        assert cookie["expires"] > _time.time() + 300 * 86400
+
+    @pytest.mark.asyncio(loop_scope="session")
+    @patch("src.crawler.async_playwright")
+    async def test_crawl_seeds_consent_before_navigation(self, mock_pw):
+        """``add_cookies`` must be called before ``page.goto``."""
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        browser = _make_mock_browser(context)
+
+        # Track call order on the context
+        call_order: list[str] = []
+        original_add = context.add_cookies
+        original_clear = context.clear_cookies
+
+        async def _add(*args, **kwargs):
+            call_order.append("add_cookies")
+            return await original_add(*args, **kwargs)
+
+        async def _clear(*args, **kwargs):
+            call_order.append("clear_cookies")
+            return await original_clear(*args, **kwargs)
+
+        async def _goto(*args, **kwargs):
+            call_order.append("goto")
+
+        context.add_cookies = AsyncMock(side_effect=_add)
+        context.clear_cookies = AsyncMock(side_effect=_clear)
+        page.goto = AsyncMock(side_effect=_goto)
+
+        pw_instance = AsyncMock()
+        pw_instance.chromium.launch = AsyncMock(return_value=browser)
+        mock_pw.return_value.__aenter__ = AsyncMock(return_value=pw_instance)
+        mock_pw.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        crawler = CookieCrawler()
+        await crawler.crawl_site(["https://example.com/"])
+
+        assert call_order == ["clear_cookies", "add_cookies", "goto"], call_order
+
+        # And the cookie payload was the one we expect
+        seeded = context.add_cookies.call_args.args[0]
+        assert len(seeded) == 1
+        assert seeded[0]["name"] == "_consentos_consent"
+        assert seeded[0]["url"] == "https://example.com/"
