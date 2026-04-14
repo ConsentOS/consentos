@@ -3,6 +3,15 @@
 **/node_modules
 **/.venv
 **/*.pyc
+**/dist
+**/build
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
 .env
 *.md
 docs/
+sdks/
+tests/load/
+helm/
+scripts/

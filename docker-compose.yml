@@ -106,8 +106,11 @@ services:
 
   admin-ui:
     build:
-      context: ./apps/admin-ui
-      dockerfile: Dockerfile
+      # Context is the repo root so the Dockerfile can pull in
+      # apps/banner/ alongside apps/admin-ui/ and bake both into
+      # a single nginx image.
+      context: .
+      dockerfile: apps/admin-ui/Dockerfile
     ports:
       - "5173:80"
     depends_on:
