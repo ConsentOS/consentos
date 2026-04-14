@@ -13,6 +13,7 @@ import { hasConsent, readConsent } from './consent';
 import { buildDeniedDefaults, buildGcmStateFromCategories, setGcmDefaults, updateGcm } from './gcm';
 import { isGpcEnabled } from './gpc';
 import type { GppApiCallback, GppApiFunction, GppQueueEntry } from './gpp-api';
+import type { CategorySlug } from './types';
 
 declare global {
   interface Window {
@@ -25,6 +26,15 @@ declare global {
       visitorRegion?: string;
       /** Whether GPC signal was detected by the loader. */
       gpcDetected?: boolean;
+      /**
+       * Internal: drives the blocker installed by the loader. The
+       * banner bundle is a separate IIFE with its own module scope,
+       * so it can't share ``acceptedCategories`` via a direct import
+       * — it has to call back through this bridge. See
+       * ``apps/banner/src/blocker.ts`` for the state it mutates.
+       * Consumers outside the banner bundle should not call this.
+       */
+      _updateBlocker?: (accepted: CategorySlug[]) => void;
     };
     /** Public ConsentOS API for site integration. */
     ConsentOS: {
@@ -100,6 +110,16 @@ declare global {
 
   // 1. Install script/cookie blocker immediately (before any third-party scripts)
   installBlocker();
+
+  // 1a. Bridge the blocker to the full banner bundle. ``consent-bundle.js``
+  // is built as a separate rollup IIFE with its own module scope, so it
+  // gets its own dead-end copy of ``blocker.ts``. Expose the loader's
+  // live ``updateAcceptedCategories`` on ``window.__consentos`` so
+  // ``handleConsent`` in the bundle can drive the loader's proxies
+  // directly. Without this, consent updates from the bundle would only
+  // mutate the bundle's copy and the cookie/storage proxies running in
+  // the loader's scope would stay stuck on ``Set(['necessary'])``.
+  window.__consentos._updateBlocker = updateAcceptedCategories;
 
   // 1b. Install __gpp stub — queues calls until the full bundle loads
   installGppStub();
