@@ -10,11 +10,38 @@
  */
 
 import { announce, createLiveRegion, focusFirst, onEscape, prefersReducedMotion, trapFocus } from './a11y';
-import { updateAcceptedCategories } from './blocker';
+// NB: intentionally NOT importing from './blocker'. The loader already
+// installed the blocker proxies in its own IIFE module scope, and
+// the bundle can't share that state via a direct import — rollup
+// builds ``consent-loader.js`` and ``consent-bundle.js`` as separate
+// IIFEs so each one inlines its own private copy of every module.
+// The loader exposes ``_updateBlocker`` on ``window.__consentos``
+// for us to drive its proxies — see ``updateAcceptedCategories``
+// below and ``apps/banner/src/loader.ts``.
 import { buildConsentState, readConsent, writeConsent } from './consent';
 import { buildGcmStateFromCategories, updateGcm } from './gcm';
 import { type TranslationStrings, DEFAULT_TRANSLATIONS, detectLocale, interpolate, loadTranslations, renderLinks } from './i18n';
 import type { BannerConfig, ButtonConfig, CategorySlug, SiteConfig } from './types';
+
+/**
+ * Drive the loader's blocker proxies with a new accepted-categories
+ * set. Falls back to a ``console.warn`` if the bridge is missing,
+ * which would mean the loader hasn't finished ``installBlocker`` yet
+ * (shouldn't happen — the bundle only loads after the loader's
+ * synchronous init phase). Exported for unit testing only.
+ */
+export function updateAcceptedCategories(accepted: CategorySlug[]): void {
+  const bridge = window.__consentos?._updateBlocker;
+  if (typeof bridge === 'function') {
+    bridge(accepted);
+  } else if (typeof console !== 'undefined') {
+    console.warn(
+      '[ConsentOS] blocker bridge missing — consent granted but ' +
+        'cookie/script blocker state was not updated. The loader ' +
+        'may not have initialised correctly.',
+    );
+  }
+}
 
 // -- Preference-centre closure captured during init() ---------------------
 

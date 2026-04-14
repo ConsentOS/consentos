@@ -8,11 +8,16 @@
  * 4. Fetch site config from CDN/API
  */
 
-import { installBlocker, updateAcceptedCategories } from './blocker';
+import {
+  installBlocker,
+  sweepDisallowedState,
+  updateAcceptedCategories,
+} from './blocker';
 import { hasConsent, readConsent } from './consent';
 import { buildDeniedDefaults, buildGcmStateFromCategories, setGcmDefaults, updateGcm } from './gcm';
 import { isGpcEnabled } from './gpc';
 import type { GppApiCallback, GppApiFunction, GppQueueEntry } from './gpp-api';
+import type { CategorySlug } from './types';
 
 declare global {
   interface Window {
@@ -25,6 +30,15 @@ declare global {
       visitorRegion?: string;
       /** Whether GPC signal was detected by the loader. */
       gpcDetected?: boolean;
+      /**
+       * Internal: drives the blocker installed by the loader. The
+       * banner bundle is a separate IIFE with its own module scope,
+       * so it can't share ``acceptedCategories`` via a direct import
+       * — it has to call back through this bridge. See
+       * ``apps/banner/src/blocker.ts`` for the state it mutates.
+       * Consumers outside the banner bundle should not call this.
+       */
+      _updateBlocker?: (accepted: CategorySlug[]) => void;
     };
     /** Public ConsentOS API for site integration. */
     ConsentOS: {
@@ -101,6 +115,16 @@ declare global {
   // 1. Install script/cookie blocker immediately (before any third-party scripts)
   installBlocker();
 
+  // 1a. Bridge the blocker to the full banner bundle. ``consent-bundle.js``
+  // is built as a separate rollup IIFE with its own module scope, so it
+  // gets its own dead-end copy of ``blocker.ts``. Expose the loader's
+  // live ``updateAcceptedCategories`` on ``window.__consentos`` so
+  // ``handleConsent`` in the bundle can drive the loader's proxies
+  // directly. Without this, consent updates from the bundle would only
+  // mutate the bundle's copy and the cookie/storage proxies running in
+  // the loader's scope would stay stuck on ``Set(['necessary'])``.
+  window.__consentos._updateBlocker = updateAcceptedCategories;
+
   // 1b. Install __gpp stub — queues calls until the full bundle loads
   installGppStub();
 
@@ -114,7 +138,11 @@ declare global {
   const existingConsent = readConsent();
 
   if (existingConsent) {
-    // Consent already given — update blocker, GCM, and we're done
+    // Consent already given — update blocker (which also sweeps any
+    // cookies / storage in non-accepted categories), update GCM, and
+    // we're done. ``updateAcceptedCategories`` runs the sweep
+    // internally so historical trackers from a previously-wider
+    // consent set get cleaned up.
     updateAcceptedCategories(existingConsent.accepted as import('./types').CategorySlug[]);
     const gcmState = buildGcmStateFromCategories(existingConsent.accepted);
     updateGcm(gcmState);
@@ -124,7 +152,15 @@ declare global {
     return;
   }
 
-  // 4. No consent — async-load the full banner bundle
+  // 4. No consent. Sweep any pre-existing classified trackers
+  // (typically ``_ga``, ``_fbp`` and friends that slipped in before
+  // the blocker was installed — e.g. from a script-ordering bug on
+  // the host page) so the visitor starts from a clean slate. Runs
+  // against the default ``Set(['necessary'])`` so every non-necessary
+  // known tracker is deleted.
+  sweepDisallowedState();
+
+  // 5. Async-load the full banner bundle
   loadBannerBundle(cdnBase);
 })();
 
