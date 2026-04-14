@@ -7,6 +7,7 @@ import {
   isCategoryAllowed,
   addScriptPatterns,
   loadInitiatorMappings,
+  sweepDisallowedState,
 } from '../blocker';
 
 describe('blocker', () => {
@@ -328,6 +329,111 @@ describe('blocker', () => {
       uninstallBlocker();
       expect(isCategoryAllowed('analytics')).toBe(false);
       expect(isCategoryAllowed('necessary')).toBe(true);
+    });
+  });
+
+  describe('sweepDisallowedState', () => {
+    /**
+     * Reset the cookie jar by expiring any test cookies we know
+     * about. ``document.cookie =`` runs through the proxy so
+     * ``_consentos_*`` passes the shortcut and everything else gets
+     * eaten by the blocker's classifier. Expiring the well-known
+     * analytics cookies here gives the individual tests a clean
+     * starting point without relying on the jsdom harness to wipe
+     * between tests.
+     */
+    function resetCookies(names: string[]) {
+      for (const name of names) {
+        document.cookie = `_consentos_reset_marker=${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+      }
+    }
+
+    beforeEach(() => {
+      // Directly seed cookies via the native descriptor so the
+      // proxied setter doesn't eat them as "tracker writes with
+      // no consent".
+      const nativeSet = Object.getOwnPropertyDescriptor(
+        Document.prototype,
+        'cookie',
+      )?.set;
+      if (!nativeSet) throw new Error('cannot locate native cookie setter');
+      nativeSet.call(
+        document,
+        '_ga=GA1.2.seed; path=/',
+      );
+      nativeSet.call(
+        document,
+        '_fbp=fb.2.seed; path=/',
+      );
+      nativeSet.call(
+        document,
+        'unknown_cookie=opaque; path=/',
+      );
+      nativeSet.call(
+        document,
+        '_consentos_consent=%7B%7D; path=/',
+      );
+    });
+
+    afterEach(() => {
+      resetCookies(['_ga', '_fbp', 'unknown_cookie', '_consentos_consent']);
+    });
+
+    it('deletes non-consented analytics cookies', () => {
+      updateAcceptedCategories(['necessary']);
+      // ^^ updateAcceptedCategories calls sweep internally; the
+      // assertions below verify the post-sweep cookie jar.
+      expect(document.cookie).not.toContain('_ga=');
+      expect(document.cookie).not.toContain('_fbp=');
+    });
+
+    it('leaves consented cookies alone', () => {
+      updateAcceptedCategories(['necessary', 'analytics', 'marketing']);
+      expect(document.cookie).toContain('_ga=');
+      expect(document.cookie).toContain('_fbp=');
+    });
+
+    it('leaves unknown cookies alone even without consent', () => {
+      updateAcceptedCategories(['necessary']);
+      expect(document.cookie).toContain('unknown_cookie=');
+    });
+
+    it('never touches _consentos_* cookies', () => {
+      updateAcceptedCategories(['necessary']);
+      expect(document.cookie).toContain('_consentos_consent=');
+    });
+
+    it('standalone sweepDisallowedState respects the current set', () => {
+      updateAcceptedCategories(['necessary', 'analytics']);
+      // Re-seed _ga after the first sweep would have left it (analytics consented).
+      const nativeSet = Object.getOwnPropertyDescriptor(
+        Document.prototype,
+        'cookie',
+      )?.set;
+      nativeSet?.call(document, '_fbp=fb.2.reseed; path=/');
+
+      // Revoke marketing, sweep again.
+      updateAcceptedCategories(['necessary', 'analytics']);
+      sweepDisallowedState();
+      expect(document.cookie).toContain('_ga=');
+      expect(document.cookie).not.toContain('_fbp=');
+    });
+
+    it('cleans non-consented localStorage keys', () => {
+      localStorage.setItem('_consentos_keep', 'yes');
+      // Seed via a direct setItem — the proxied setter would block
+      // non-necessary writes, but we want a pre-existing key.
+      const nativeSetItem = Object.getPrototypeOf(localStorage).setItem;
+      nativeSetItem.call(localStorage, '_ga_stuff', 'tracker');
+      nativeSetItem.call(localStorage, 'opaque_key', 'leave-alone');
+
+      updateAcceptedCategories(['necessary']);
+
+      expect(localStorage.getItem('_consentos_keep')).toBe('yes');
+      expect(localStorage.getItem('_ga_stuff')).toBeNull();
+      expect(localStorage.getItem('opaque_key')).toBe('leave-alone');
+
+      localStorage.clear();
     });
   });
 });

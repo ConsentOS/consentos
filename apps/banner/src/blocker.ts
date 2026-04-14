@@ -122,12 +122,29 @@ export function loadInitiatorMappings(mappings: InitiatorMapping[]): void {
 }
 
 /**
- * Update the set of accepted categories and release any blocked scripts
- * that now have consent.
+ * Update the set of accepted categories, release any blocked scripts
+ * that now have consent, and sweep any existing cookies / storage
+ * items that belong to a category the visitor has **not** consented
+ * to. Consented categories are left untouched — those cookies are
+ * presumed to be in use by the site.
  */
 export function updateAcceptedCategories(categories: CategorySlug[]): void {
   acceptedCategories = new Set(categories);
   releaseBlockedScripts();
+  sweepDisallowedState();
+}
+
+/**
+ * Delete any existing cookies and storage items whose classified
+ * category isn't currently consented. Runs on install and every
+ * consent-state update so historical trackers from pre-consent, a
+ * previous session, or a narrowed consent decision get removed.
+ * Unknown / unclassified cookies are left alone since we can't
+ * attribute them to a category.
+ */
+export function sweepDisallowedState(): void {
+  sweepDisallowedCookies();
+  sweepDisallowedStorage();
 }
 
 /** Get the current blocked script count (useful for debugging/reporting). */
@@ -490,6 +507,114 @@ function allNonEssentialConsented(): boolean {
     acceptedCategories.has('marketing') &&
     acceptedCategories.has('personalisation')
   );
+}
+
+// ─── Sweep existing state ──────────────────────────────────────────────
+
+/** Delete classified cookies that aren't in a consented category. */
+function sweepDisallowedCookies(): void {
+  if (typeof document === 'undefined') return;
+  if (!originalCookieDescriptor?.set) return;
+
+  const cookieHeader = document.cookie || '';
+  if (!cookieHeader) return;
+
+  const nativeSet = originalCookieDescriptor.set.bind(document);
+  const seen = new Set<string>();
+
+  for (const entry of cookieHeader.split(';')) {
+    const name = parseCookieName(entry);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+
+    // Never touch ConsentOS's own cookies.
+    if (name.startsWith('_consentos_')) continue;
+
+    const category = classifyCookie(name);
+    // Unknown / unclassified cookies get left alone — we can't
+    // attribute them so we can't safely delete them.
+    if (!category || category === 'necessary') continue;
+    if (acceptedCategories.has(category)) continue;
+
+    // Expire the cookie. We don't know the domain / path the cookie
+    // was set on, so we fire deletes for every plausible combination:
+    // the current hostname bare, the leading-dot form, and every
+    // parent domain walked up from the left. This catches the common
+    // case of analytics cookies set on ``.example.com`` from a
+    // subdomain page without over-deleting.
+    const expired = 'expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+    try {
+      nativeSet(`${name}=; ${expired}`);
+      for (const domain of domainVariants()) {
+        nativeSet(`${name}=; ${expired}; domain=${domain}`);
+      }
+    } catch {
+      // Writing a cookie can throw in exotic sandboxed contexts;
+      // best-effort, don't crash the loader.
+    }
+  }
+}
+
+/** Derived list of plausible cookie domains for the current hostname. */
+function domainVariants(): string[] {
+  if (typeof location === 'undefined' || !location.hostname) return [];
+
+  const hostname = location.hostname;
+  // IP addresses and ``localhost`` have no "parent domain" concept.
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname === 'localhost') {
+    return [hostname];
+  }
+
+  const parts = hostname.split('.');
+  const variants: string[] = [];
+  for (let i = 0; i < parts.length - 1; i++) {
+    const parent = parts.slice(i).join('.');
+    if (parent) {
+      variants.push(parent, `.${parent}`);
+    }
+  }
+  return Array.from(new Set(variants));
+}
+
+/** Delete classified localStorage / sessionStorage keys that aren't consented. */
+function sweepDisallowedStorage(): void {
+  if (typeof Storage === 'undefined') return;
+
+  for (const storage of [safeStorage('local'), safeStorage('session')]) {
+    if (!storage) continue;
+
+    const toRemove: string[] = [];
+    try {
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i);
+        if (!key || key.startsWith('_consentos_')) continue;
+        const category = classifyStorageKey(key);
+        if (!category || category === 'necessary') continue;
+        if (acceptedCategories.has(category)) continue;
+        toRemove.push(key);
+      }
+    } catch {
+      continue;
+    }
+
+    for (const key of toRemove) {
+      try {
+        storage.removeItem(key);
+      } catch {
+        // Ignore quota / security errors — best-effort.
+      }
+    }
+  }
+}
+
+/** Return the requested Storage instance, or null if inaccessible. */
+function safeStorage(kind: 'local' | 'session'): Storage | null {
+  try {
+    return kind === 'local' ? window.localStorage : window.sessionStorage;
+  } catch {
+    // Access can throw on cross-origin / sandboxed iframes.
+    return null;
+  }
 }
 
 // ─── Teardown (for testing) ───

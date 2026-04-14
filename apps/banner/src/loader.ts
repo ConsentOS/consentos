@@ -8,7 +8,11 @@
  * 4. Fetch site config from CDN/API
  */
 
-import { installBlocker, updateAcceptedCategories } from './blocker';
+import {
+  installBlocker,
+  sweepDisallowedState,
+  updateAcceptedCategories,
+} from './blocker';
 import { hasConsent, readConsent } from './consent';
 import { buildDeniedDefaults, buildGcmStateFromCategories, setGcmDefaults, updateGcm } from './gcm';
 import { isGpcEnabled } from './gpc';
@@ -134,7 +138,11 @@ declare global {
   const existingConsent = readConsent();
 
   if (existingConsent) {
-    // Consent already given — update blocker, GCM, and we're done
+    // Consent already given — update blocker (which also sweeps any
+    // cookies / storage in non-accepted categories), update GCM, and
+    // we're done. ``updateAcceptedCategories`` runs the sweep
+    // internally so historical trackers from a previously-wider
+    // consent set get cleaned up.
     updateAcceptedCategories(existingConsent.accepted as import('./types').CategorySlug[]);
     const gcmState = buildGcmStateFromCategories(existingConsent.accepted);
     updateGcm(gcmState);
@@ -144,7 +152,15 @@ declare global {
     return;
   }
 
-  // 4. No consent — async-load the full banner bundle
+  // 4. No consent. Sweep any pre-existing classified trackers
+  // (typically ``_ga``, ``_fbp`` and friends that slipped in before
+  // the blocker was installed — e.g. from a script-ordering bug on
+  // the host page) so the visitor starts from a clean slate. Runs
+  // against the default ``Set(['necessary'])`` so every non-necessary
+  // known tracker is deleted.
+  sweepDisallowedState();
+
+  // 5. Async-load the full banner bundle
   loadBannerBundle(cdnBase);
 })();
 
