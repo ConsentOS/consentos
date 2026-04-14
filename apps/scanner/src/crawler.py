@@ -77,6 +77,7 @@ def _build_consent_cookie(url: str) -> dict:
         "sameSite": "Lax",
     }
 
+
 # Realistic Chrome UA so sites don't block the crawler as a bot.
 _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
