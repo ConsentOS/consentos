@@ -52,6 +52,11 @@ class SiteGroupConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     privacy_policy_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     terms_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Cookie categories shown in the banner. NULL = inherit (system
+    # default is all five). See ``SiteConfig.enabled_categories`` for
+    # the full cascade semantics.
+    enabled_categories: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # Scanning
     scan_schedule_cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
     scan_max_pages: Mapped[int | None] = mapped_column(Integer, nullable=True)

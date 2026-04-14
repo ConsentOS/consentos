@@ -89,6 +89,12 @@ export function registerEEHooks(hooks: Partial<EEHooks>): void {
 // Expose for EE bundle
 (window as any).__consentos_register_ee = registerEEHooks;
 
+/**
+ * Every known category, in canonical display order. Used as the
+ * fallback when ``SiteConfig.enabled_categories`` isn't present in
+ * the API response (older deployments) and as the reference order
+ * for deduping / sorting runtime subsets.
+ */
 const ALL_CATEGORIES: CategorySlug[] = [
   'necessary',
   'functional',
@@ -97,12 +103,33 @@ const ALL_CATEGORIES: CategorySlug[] = [
   'personalisation',
 ];
 
-const NON_ESSENTIAL: CategorySlug[] = [
-  'functional',
-  'analytics',
-  'marketing',
-  'personalisation',
-];
+/**
+ * Return the categories the banner should render for this config.
+ * ``necessary`` is always implicit and forced back in if missing;
+ * unknown slugs are filtered; the result is sorted into the canonical
+ * display order so toggle positions don't jump around based on the
+ * cascade's insertion order. When the field is absent we return the
+ * full five — matches legacy behaviour and keeps older banner
+ * bundles working against an older API.
+ */
+function resolveEnabledCategories(config: SiteConfig): CategorySlug[] {
+  const raw = config.enabled_categories;
+  if (!raw || !Array.isArray(raw) || raw.length === 0) {
+    return [...ALL_CATEGORIES];
+  }
+  const picked = new Set<CategorySlug>(
+    raw.filter((slug): slug is CategorySlug =>
+      (ALL_CATEGORIES as string[]).includes(slug as string),
+    ),
+  );
+  picked.add('necessary');
+  return ALL_CATEGORIES.filter((slug) => picked.has(slug));
+}
+
+/** Categories the user can toggle — everything except ``necessary``. */
+function nonEssentialFor(enabled: CategorySlug[]): CategorySlug[] {
+  return enabled.filter((slug) => slug !== 'necessary');
+}
 
 /** Initialise the banner. Called when the bundle loads. */
 async function init(): Promise<void> {
@@ -240,6 +267,7 @@ function buildDefaultConfig(siteId: string): SiteConfig {
     consent_group_id: null,
     ab_test: null,
     initiator_map: null,
+    enabled_categories: [...ALL_CATEGORIES],
   };
 }
 
@@ -266,6 +294,9 @@ function renderBanner(
   const titleId = 'cmp-title';
   const descId = 'cmp-desc';
 
+  const enabledCategories = resolveEnabledCategories(config);
+  const nonEssential = nonEssentialFor(enabledCategories);
+
   shadow.innerHTML = `
     <style>${getBannerStyles(config)}</style>
     <div class="consentos-banner" role="dialog" aria-label="${t.title}" aria-labelledby="${titleId}" aria-describedby="${descId}" aria-modal="true">
@@ -277,7 +308,7 @@ function renderBanner(
           </p>
         </div>
         <div class="consentos-banner__categories" id="consentos-categories" role="group" aria-label="${t.managePreferences}">
-          ${renderCategories(t)}
+          ${renderCategories(t, enabledCategories)}
         </div>
         <div class="consentos-banner__actions" role="group" aria-label="Consent actions">
           <button class="cmp-btn cmp-btn--secondary" data-action="reject" type="button">
@@ -321,7 +352,7 @@ function renderBanner(
   // Set up keyboard navigation
   const cleanupFocusTrap = trapFocus(banner);
   const cleanupEscape = onEscape(banner, () => {
-    handleConsent(['necessary'], NON_ESSENTIAL, config, gpcResult, abAssignment, t);
+    handleConsent(['necessary'], nonEssential, config, gpcResult, abAssignment, t);
     removeBanner(host, cleanupFocusTrap, cleanupEscape);
   });
 
@@ -329,11 +360,12 @@ function renderBanner(
     btn.addEventListener('click', (e) => {
       const action = (e.currentTarget as HTMLElement).getAttribute('data-action');
       if (action === 'accept') {
-        // Explicit Accept All overrides GPC — user choice takes precedence
-        handleConsent(ALL_CATEGORIES, [], config, gpcResult, abAssignment, t);
+        // Explicit Accept All overrides GPC — user choice takes precedence.
+        // "All" only includes the categories the operator has enabled.
+        handleConsent([...enabledCategories], [], config, gpcResult, abAssignment, t);
         removeBanner(host, cleanupFocusTrap, cleanupEscape);
       } else if (action === 'reject') {
-        handleConsent(['necessary'], NON_ESSENTIAL, config, gpcResult, abAssignment, t);
+        handleConsent(['necessary'], nonEssential, config, gpcResult, abAssignment, t);
         removeBanner(host, cleanupFocusTrap, cleanupEscape);
       } else if (action === 'settings') {
         const isHidden = categoriesDiv.style.display === 'none';
@@ -342,7 +374,7 @@ function renderBanner(
         announce(liveRegion, isHidden ? t.managePreferences : t.title);
       } else if (action === 'save') {
         const accepted = getSelectedCategories(shadow);
-        const rejected = NON_ESSENTIAL.filter((c) => !accepted.includes(c));
+        const rejected = nonEssential.filter((c) => !accepted.includes(c));
         handleConsent(accepted, rejected, config, gpcResult, abAssignment, t);
         removeBanner(host, cleanupFocusTrap, cleanupEscape);
       }
@@ -355,15 +387,19 @@ function renderBanner(
   focusFirst(banner);
 }
 
-/** Render category toggles HTML. */
-function renderCategories(t: TranslationStrings): string {
-  const categories = [
-    { slug: 'necessary', name: t.categoryNecessary, desc: t.categoryNecessaryDesc, locked: true },
-    { slug: 'functional', name: t.categoryFunctional, desc: t.categoryFunctionalDesc, locked: false },
-    { slug: 'analytics', name: t.categoryAnalytics, desc: t.categoryAnalyticsDesc, locked: false },
-    { slug: 'marketing', name: t.categoryMarketing, desc: t.categoryMarketingDesc, locked: false },
-    { slug: 'personalisation', name: t.categoryPersonalisation, desc: t.categoryPersonalisationDesc, locked: false },
+/** Render category toggles HTML. Only renders the categories the
+ *  config has enabled — ``necessary`` is always present and locked. */
+function renderCategories(t: TranslationStrings, enabled: CategorySlug[]): string {
+  const all = [
+    { slug: 'necessary' as const, name: t.categoryNecessary, desc: t.categoryNecessaryDesc, locked: true },
+    { slug: 'functional' as const, name: t.categoryFunctional, desc: t.categoryFunctionalDesc, locked: false },
+    { slug: 'analytics' as const, name: t.categoryAnalytics, desc: t.categoryAnalyticsDesc, locked: false },
+    { slug: 'marketing' as const, name: t.categoryMarketing, desc: t.categoryMarketingDesc, locked: false },
+    { slug: 'personalisation' as const, name: t.categoryPersonalisation, desc: t.categoryPersonalisationDesc, locked: false },
   ];
+
+  const enabledSet = new Set(enabled);
+  const categories = all.filter((cat) => enabledSet.has(cat.slug));
 
   return (
     categories

@@ -30,6 +30,7 @@ class SiteGroupConfigUpdate(BaseModel):
     scan_schedule_cron: str | None = None
     scan_max_pages: int | None = Field(default=None, ge=1, le=1000)
     consent_expiry_days: int | None = Field(default=None, ge=1, le=730)
+    enabled_categories: list[str] | None = None
 
 
 class SiteGroupConfigResponse(BaseModel):
@@ -53,6 +54,7 @@ class SiteGroupConfigResponse(BaseModel):
     scan_schedule_cron: str | None
     scan_max_pages: int | None
     consent_expiry_days: int | None
+    enabled_categories: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 

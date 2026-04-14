@@ -129,9 +129,61 @@ export interface SiteConfig {
   scan_enabled: boolean;
   scan_frequency_hours: number;
   scan_max_pages: number;
+  /**
+   * Cookie categories the banner should display. ``null`` means
+   * "inherit from the cascade" (group → org → system default of all
+   * five). An explicit list overrides; ``necessary`` is always
+   * implicit and re-added by the resolver if missing.
+   */
+  enabled_categories: CategorySlug[] | null;
   created_at: string;
   updated_at: string;
 }
+
+export type CategorySlug =
+  | 'necessary'
+  | 'functional'
+  | 'analytics'
+  | 'marketing'
+  | 'personalisation';
+
+export const ALL_COOKIE_CATEGORIES: {
+  slug: CategorySlug;
+  label: string;
+  description: string;
+  locked: boolean;
+}[] = [
+  {
+    slug: 'necessary',
+    label: 'Necessary',
+    description: 'Essential for the website to function. Always active and cannot be disabled.',
+    locked: true,
+  },
+  {
+    slug: 'functional',
+    label: 'Functional',
+    description: 'Remember preferences and enable enhanced features (e.g. language, chat widgets).',
+    locked: false,
+  },
+  {
+    slug: 'analytics',
+    label: 'Analytics',
+    description: 'Measure traffic and interaction so you can understand how visitors use the site.',
+    locked: false,
+  },
+  {
+    slug: 'marketing',
+    label: 'Marketing',
+    description: 'Advertising, remarketing, and cross-site tracking.',
+    locked: false,
+  },
+  {
+    slug: 'personalisation',
+    label: 'Personalisation',
+    description: 'Tailor content, recommendations, and the banner appearance to the visitor.',
+    locked: false,
+  },
+];
 
 export interface ButtonConfig {
   backgroundColour?: string;

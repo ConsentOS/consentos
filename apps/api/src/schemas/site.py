@@ -65,6 +65,10 @@ class SiteConfigCreate(BaseModel):
     scan_max_pages: int = Field(default=50, ge=1, le=1000)
     consent_expiry_days: int = Field(default=365, ge=1, le=730)
     consent_retention_days: int | None = Field(default=None, ge=1, le=730)
+    # None = inherit from the cascade (group → org → system). An
+    # explicit list overrides; the resolver re-adds ``necessary``
+    # if omitted and drops any unknown slugs.
+    enabled_categories: list[str] | None = None
 
 
 class SiteConfigUpdate(BaseModel):
@@ -87,6 +91,7 @@ class SiteConfigUpdate(BaseModel):
     scan_max_pages: int | None = Field(default=None, ge=1, le=1000)
     consent_expiry_days: int | None = Field(default=None, ge=1, le=730)
     consent_retention_days: int | None = Field(default=None, ge=1, le=730)
+    enabled_categories: list[str] | None = None
 
 
 class SiteConfigResponse(BaseModel):
@@ -111,6 +116,7 @@ class SiteConfigResponse(BaseModel):
     scan_max_pages: int = 50
     consent_expiry_days: int = 365
     consent_retention_days: int | None = None
+    enabled_categories: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
 import { getSite, getSiteConfig, updateSiteConfig } from '../api/sites';
+import SiteCategoriesTab from '../components/SiteCategoriesTab';
 import SiteComplianceTab from '../components/SiteComplianceTab';
 import SiteConfigTab from '../components/SiteConfigTab';
 import SiteCookiesTab from '../components/SiteCookiesTab';
@@ -16,6 +17,7 @@ import { getSiteDetailTabs } from '../extensions/registry';
 const CORE_TABS: { id: string; label: string; order: number }[] = [
   { id: 'overview', label: 'Overview', order: 10 },
   { id: 'config', label: 'Configuration', order: 20 },
+  { id: 'categories', label: 'Categories', order: 25 },
   { id: 'cookies', label: 'Cookies', order: 30 },
   { id: 'banner', label: 'Banner', order: 40 },
   { id: 'translations', label: 'Translations', order: 50 },
@@ -89,6 +91,9 @@ export default function SiteDetailPage() {
       {/* Tab content — core tabs */}
       {activeTab === 'overview' && <SiteOverviewTab site={site} config={config ?? null} />}
       {activeTab === 'config' && siteId && <SiteConfigTab siteId={siteId} config={config ?? null} />}
+      {activeTab === 'categories' && siteId && (
+        <SiteCategoriesTab siteId={siteId} config={config ?? null} />
+      )}
       {activeTab === 'cookies' && siteId && <SiteCookiesTab siteId={siteId} />}
       {activeTab === 'banner' && siteId && (
         <BannerBuilderTab

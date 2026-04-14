@@ -10,6 +10,23 @@ from __future__ import annotations
 
 from typing import Any
 
+# Every known cookie category, in the canonical display order the
+# banner uses. The system default for ``enabled_categories`` is this
+# full list; operators subset from the top via the cascade.
+ALL_CATEGORIES: list[str] = [
+    "necessary",
+    "functional",
+    "analytics",
+    "marketing",
+    "personalisation",
+]
+
+# ``necessary`` is never optional — operators can't hide it and the
+# merged result always contains it, even if it's been accidentally
+# dropped from every layer of the cascade.
+REQUIRED_CATEGORIES: frozenset[str] = frozenset({"necessary"})
+
+
 # System-level defaults (hard-coded, lowest priority)
 SYSTEM_DEFAULTS: dict[str, Any] = {
     "blocking_mode": "opt_in",
@@ -34,6 +51,10 @@ SYSTEM_DEFAULTS: dict[str, Any] = {
     "privacy_policy_url": None,
     "terms_url": None,
     "consent_expiry_days": 365,
+    # All five categories visible by default; any cascade layer may
+    # narrow this to a subset. The resolver normalises the result
+    # via ``_normalise_enabled_categories``.
+    "enabled_categories": ALL_CATEGORIES,
 }
 
 
@@ -77,7 +98,31 @@ def resolve_config(
             if regional_mode:
                 resolved["blocking_mode"] = regional_mode
 
+    resolved["enabled_categories"] = _normalise_enabled_categories(
+        resolved.get("enabled_categories")
+    )
+
     return resolved
+
+
+def _normalise_enabled_categories(value: Any) -> list[str]:
+    """Clean a merged ``enabled_categories`` value into a canonical list.
+
+    - ``None`` / empty / invalid types fall back to the full default.
+    - Unknown slugs are stripped so a typo can't light up a category
+      the banner doesn't actually render.
+    - ``necessary`` is always forced into the output — required
+      categories can never be absent, regardless of what the operator
+      configured. The order mirrors ``ALL_CATEGORIES`` so the banner
+      renders tabs in a consistent order no matter the insertion order.
+    """
+    if not isinstance(value, list) or not value:
+        return list(ALL_CATEGORIES)
+
+    known = set(ALL_CATEGORIES)
+    picked = {slug for slug in value if isinstance(slug, str) and slug in known}
+    picked.update(REQUIRED_CATEGORIES)
+    return [slug for slug in ALL_CATEGORIES if slug in picked]
 
 
 def build_public_config(
@@ -108,6 +153,11 @@ def build_public_config(
         "consent_expiry_days": resolved["consent_expiry_days"],
         "consent_group_id": resolved.get("consent_group_id"),
         "ab_test": resolved.get("ab_test"),
+        # Public name is ``enabled_categories`` here; the banner schema
+        # converts that to ``enabledCategories`` when it serialises.
+        "enabled_categories": _normalise_enabled_categories(
+            resolved.get("enabled_categories")
+        ),
     }
 
 
@@ -128,6 +178,7 @@ CONFIG_FIELDS = (
     "privacy_policy_url",
     "terms_url",
     "consent_expiry_days",
+    "enabled_categories",
 )
 
 

@@ -5,7 +5,9 @@ import uuid
 import pytest
 
 from src.services.config_resolver import (
+    ALL_CATEGORIES,
     SYSTEM_DEFAULTS,
+    _normalise_enabled_categories,
     build_public_config,
     resolve_config,
 )
@@ -256,3 +258,72 @@ class TestConfigRoutes:
         site_id = uuid.uuid4()
         resp = await client.post(f"/api/v1/config/sites/{site_id}/publish")
         assert resp.status_code == 401
+
+
+class TestEnabledCategories:
+    """Cascade semantics for ``enabled_categories``."""
+
+    def test_system_default_is_all_five(self):
+        result = resolve_config({})
+        assert result["enabled_categories"] == ALL_CATEGORIES
+
+    def test_site_override_narrows_system_default(self):
+        result = resolve_config({"enabled_categories": ["necessary", "analytics"]})
+        assert result["enabled_categories"] == ["necessary", "analytics"]
+
+    def test_site_override_beats_org_override(self):
+        result = resolve_config(
+            site_config={"enabled_categories": ["necessary", "marketing"]},
+            org_defaults={"enabled_categories": ["necessary", "analytics"]},
+        )
+        assert result["enabled_categories"] == ["necessary", "marketing"]
+
+    def test_group_override_beats_org_override_when_site_unset(self):
+        result = resolve_config(
+            site_config={},
+            org_defaults={"enabled_categories": ["necessary", "analytics"]},
+            group_defaults={"enabled_categories": ["necessary", "functional"]},
+        )
+        assert result["enabled_categories"] == ["necessary", "functional"]
+
+    def test_unset_site_inherits_org(self):
+        result = resolve_config(
+            site_config={},
+            org_defaults={"enabled_categories": ["necessary", "marketing"]},
+        )
+        assert result["enabled_categories"] == ["necessary", "marketing"]
+
+    def test_necessary_forced_in_when_missing_from_override(self):
+        """Operators can't accidentally drop ``necessary``."""
+        result = resolve_config({"enabled_categories": ["analytics", "marketing"]})
+        assert "necessary" in result["enabled_categories"]
+        assert result["enabled_categories"] == ["necessary", "analytics", "marketing"]
+
+    def test_unknown_slugs_are_stripped(self):
+        result = resolve_config({"enabled_categories": ["necessary", "spam", "analytics"]})
+        assert result["enabled_categories"] == ["necessary", "analytics"]
+
+    def test_empty_list_falls_back_to_default(self):
+        """An empty list is treated as 'no categories configured' → default."""
+        result = resolve_config({"enabled_categories": []})
+        assert result["enabled_categories"] == ALL_CATEGORIES
+
+    def test_non_list_value_falls_back_to_default(self):
+        result = resolve_config({"enabled_categories": "not-a-list"})  # type: ignore[dict-item]
+        assert result["enabled_categories"] == ALL_CATEGORIES
+
+    def test_result_is_in_canonical_display_order(self):
+        """Insertion order from the cascade must not leak into the output."""
+        result = resolve_config({"enabled_categories": ["marketing", "necessary", "analytics"]})
+        assert result["enabled_categories"] == ["necessary", "analytics", "marketing"]
+
+    def test_public_config_includes_enabled_categories(self):
+        resolved = resolve_config({"enabled_categories": ["necessary", "analytics"]})
+        public = build_public_config("site-xyz", resolved)
+        assert public["enabled_categories"] == ["necessary", "analytics"]
+
+    def test_normalise_handles_none(self):
+        assert _normalise_enabled_categories(None) == ALL_CATEGORIES
+
+    def test_normalise_preserves_explicit_full_list(self):
+        assert _normalise_enabled_categories(list(ALL_CATEGORIES)) == ALL_CATEGORIES

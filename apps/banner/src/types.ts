@@ -89,6 +89,14 @@ export interface SiteConfig {
   ab_test: ABTestConfig | null;
   /** Initiator map: root script URL → category for root-level blocking. */
   initiator_map: InitiatorMapping[] | null;
+  /**
+   * Cookie categories the banner should render. Always contains
+   * ``necessary``; operators subset the remaining four via the config
+   * cascade (site → group → org → system default of all five). Older
+   * API responses may omit this field — callers should fall back to
+   * every known category in that case.
+   */
+  enabled_categories?: CategorySlug[];
 }
 
 /** Maps a root initiator script to the cookie category it ultimately sets. */
