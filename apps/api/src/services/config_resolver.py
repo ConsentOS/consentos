@@ -155,9 +155,7 @@ def build_public_config(
         "ab_test": resolved.get("ab_test"),
         # Public name is ``enabled_categories`` here; the banner schema
         # converts that to ``enabledCategories`` when it serialises.
-        "enabled_categories": _normalise_enabled_categories(
-            resolved.get("enabled_categories")
-        ),
+        "enabled_categories": _normalise_enabled_categories(resolved.get("enabled_categories")),
     }
 
 
