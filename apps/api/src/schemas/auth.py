@@ -29,6 +29,26 @@ class TokenPayload(BaseModel):
     type: str = "access"  # "access" or "refresh"
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    email: EmailStr | None = None
+    full_name: str | None = None
+
+
+class ProfileResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    full_name: str
+    role: str
+    organisation_id: uuid.UUID
+
+    model_config = {"from_attributes": True}
+
+
 class CurrentUser(BaseModel):
     """Represents the authenticated user extracted from a JWT."""
 

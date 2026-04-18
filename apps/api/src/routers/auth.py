@@ -8,11 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.settings import get_settings
 from src.db import get_db
 from src.models.user import User
-from src.schemas.auth import CurrentUser, LoginRequest, RefreshRequest, TokenResponse
+from src.schemas.auth import (
+    ChangePasswordRequest,
+    CurrentUser,
+    LoginRequest,
+    ProfileResponse,
+    RefreshRequest,
+    TokenResponse,
+    UpdateProfileRequest,
+)
 from src.services.auth import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
     verify_password,
 )
 from src.services.dependencies import get_current_user
@@ -102,7 +111,74 @@ async def refresh(
     )
 
 
-@router.get("/me", response_model=CurrentUser)
-async def get_me(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    """Return the currently authenticated user's profile from the JWT."""
-    return current_user
+@router.get("/me", response_model=ProfileResponse)
+async def get_me(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Return the currently authenticated user's profile."""
+    result = await db.execute(
+        select(User).where(User.id == current_user.id, User.deleted_at.is_(None))
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+@router.patch("/me", response_model=ProfileResponse)
+async def update_profile(
+    body: UpdateProfileRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Update the current user's email or display name."""
+    result = await db.execute(
+        select(User).where(User.id == current_user.id, User.deleted_at.is_(None))
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if body.email is not None:
+        # Check uniqueness
+        existing = await db.execute(
+            select(User).where(User.email == body.email, User.id != current_user.id)
+        )
+        if existing.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Email already in use",
+            )
+        user.email = body.email
+
+    if body.full_name is not None:
+        user.full_name = body.full_name
+
+    await db.flush()
+    await db.refresh(user)
+    return user
+
+
+@router.patch("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Change the current user's password. Requires the current password."""
+    result = await db.execute(
+        select(User).where(User.id == current_user.id, User.deleted_at.is_(None))
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    user.password_hash = hash_password(body.new_password)
+    await db.flush()

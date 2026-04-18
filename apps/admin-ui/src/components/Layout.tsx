@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAuthStore } from '../stores/auth';
 import { getNavItems } from '../extensions/registry';
@@ -13,7 +13,22 @@ const CORE_NAV_ITEMS = [
 export default function Layout() {
   const { user, logout } = useAuthStore();
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [userMenuOpen]);
 
   const NAV_ITEMS = useMemo(() => {
     const extensionItems = getNavItems().map((item) => ({
@@ -65,18 +80,47 @@ export default function Layout() {
             </nav>
           </div>
 
-          {/* Right: user info + mobile hamburger */}
+          {/* Right: user menu + mobile hamburger */}
           <div className="flex items-center gap-4">
-            <div className="hidden items-center gap-3 md:flex">
-              <span className="text-sm text-text-secondary">
-                {user?.full_name ?? user?.email}
-              </span>
+            <div className="relative hidden md:block" ref={userMenuRef}>
               <button
-                onClick={logout}
-                className="text-sm text-text-tertiary hover:text-foreground"
+                type="button"
+                onClick={() => setUserMenuOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-text-secondary transition-colors hover:bg-mist hover:text-foreground"
               >
-                Sign out
+                <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-copper/10 font-heading text-xs font-semibold text-copper">
+                  {(user?.full_name ?? user?.email ?? '?')[0].toUpperCase()}
+                </span>
+                {user?.full_name ?? user?.email}
+                <svg className="h-4 w-4 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
+              {userMenuOpen && (
+                <div className="absolute right-0 mt-1 w-48 overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => { setUserMenuOpen(false); navigate('/account'); }}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-foreground hover:bg-mist"
+                  >
+                    <svg className="h-4 w-4 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    Account
+                  </button>
+                  <div className="border-t border-border" />
+                  <button
+                    type="button"
+                    onClick={() => { setUserMenuOpen(false); logout(); }}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-text-tertiary hover:bg-mist hover:text-foreground"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    Sign out
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Mobile hamburger */}

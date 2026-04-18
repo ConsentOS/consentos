@@ -117,7 +117,8 @@ class TestMeEndpoint:
             role="owner",
             email="admin@test.com",
         )
-        db = _mock_db()
+        mock_user = _make_user(id=user_id, org_id=org_id, email="admin@test.com", role="owner")
+        db = _mock_db(scalar_one_or_none=mock_user)
         async with await _client(mock_app, db) as client:
             resp = await client.get(
                 "/api/v1/auth/me",
