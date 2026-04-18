@@ -11,8 +11,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Detect which apps changed ──────────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      scanner: ${{ steps.filter.outputs.scanner }}
+      banner: ${{ steps.filter.outputs.banner }}
+      admin-ui: ${{ steps.filter.outputs.admin-ui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+            scanner:
+              - 'apps/scanner/**'
+            banner:
+              - 'apps/banner/**'
+            admin-ui:
+              - 'apps/admin-ui/**'
+
+  # ── API ────────────────────────────────────────────────────────────
   api-lint:
     name: API Lint
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -29,6 +56,8 @@ jobs:
 
   api-test:
     name: API Tests
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -74,8 +103,11 @@ jobs:
           DATABASE_URL: postgresql://consentos_test:consentos_test@localhost:5432/consentos_test
       - run: pytest --cov=src --cov-report=term-missing -v
 
+  # ── Scanner ────────────────────────────────────────────────────────
   scanner-lint:
     name: Scanner Lint
+    needs: changes
+    if: needs.changes.outputs.scanner == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -92,6 +124,8 @@ jobs:
 
   scanner-test:
     name: Scanner Tests
+    needs: changes
+    if: needs.changes.outputs.scanner == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -105,8 +139,11 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest --cov=src --cov-report=term-missing -v
 
+  # ── Banner ─────────────────────────────────────────────────────────
   banner-lint:
     name: Banner Lint & Typecheck
+    needs: changes
+    if: needs.changes.outputs.banner == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -123,6 +160,8 @@ jobs:
 
   banner-test:
     name: Banner Tests
+    needs: changes
+    if: needs.changes.outputs.banner == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -139,8 +178,9 @@ jobs:
 
   banner-build:
     name: Banner Build
-    runs-on: ubuntu-latest
     needs: [banner-test, banner-lint]
+    if: needs.changes.outputs.banner == 'true'
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/banner
@@ -163,8 +203,11 @@ jobs:
             echo "::warning::consent-loader.js is ${LOADER_SIZE} bytes (>20KB) — consider optimising"
           fi
 
+  # ── Admin UI ───────────────────────────────────────────────────────
   admin-ui-lint:
     name: Admin UI Typecheck
+    needs: changes
+    if: needs.changes.outputs.admin-ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -181,6 +224,8 @@ jobs:
 
   admin-ui-test:
     name: Admin UI Tests
+    needs: changes
+    if: needs.changes.outputs.admin-ui == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -197,8 +242,9 @@ jobs:
 
   admin-ui-build:
     name: Admin UI Build
-    runs-on: ubuntu-latest
     needs: [admin-ui-test, admin-ui-lint]
+    if: needs.changes.outputs.admin-ui == 'true'
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/admin-ui

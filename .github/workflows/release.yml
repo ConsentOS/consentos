@@ -1,49 +1,106 @@
-# Build and push container images to GHCR when a GitHub Release is
-# published. Images are tagged with the release version (e.g. v1.0.0)
-# and ``latest``.
+# Cut a release and build container images.
 #
-# To cut a release:
-#   1. Merge your PRs to master.
-#   2. Create a tag: ``git tag v1.0.0 && git push origin v1.0.0``
-#   3. Create a GitHub Release from the tag (UI or ``gh release create``).
-#   4. This workflow triggers, builds all images, and pushes to GHCR.
-#   5. Deploy by pointing your Helm values / docker-compose at the new tag.
+# Triggered manually via ``workflow_dispatch`` (Actions tab → Run
+# workflow) when you're ready to ship. Not on every PR merge.
+#
+# Flow:
+#   1. ``ietf-tools/semver-action`` derives the next version from
+#      conventional commit messages since the last tag (feat → minor,
+#      fix → patch, breaking → major).
+#   2. ``requarks/changelog-action`` generates release notes from the
+#      commit diff between the new and previous tags.
+#   3. ``ncipollo/release-action`` creates the GitHub Release.
+#   4. ``requarks/changelog-action`` writes CHANGELOG.md and
+#      ``stefanzweifel/git-auto-commit-action`` commits it back to
+#      master with ``[skip ci]``.
+#   5. All three container images are built and pushed to GHCR,
+#      tagged with the semver version + ``latest``.
 
 name: Release
 
 on:
-  release:
-    types: [published]
-
-permissions:
-  contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/consentos
+  workflow_dispatch:
 
 jobs:
-  # ── Build and push the API image ─────────────────────────────────
-  api:
-    name: API image
+  # ── Version + Release + Changelog ────────────────────────────────
+  version:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new: ${{ steps.semver.outputs.next }}
+      newStrict: ${{ steps.semver.outputs.nextStrict }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get next version
+        id: semver
+        uses: ietf-tools/semver-action@v1
+        with:
+          token: ${{ github.token }}
+          branch: master
+
+      - name: Generate release notes
+        id: changelog
+        uses: requarks/changelog-action@v1
+        with:
+          token: ${{ github.token }}
+          fromTag: master
+          toTag: ${{ steps.semver.outputs.current }}
+          writeToFile: false
+
+      - name: Create release
+        uses: ncipollo/release-action@v1.12.0
+        with:
+          allowUpdates: true
+          draft: false
+          makeLatest: true
+          tag: ${{ steps.semver.outputs.next }}
+          body: ${{ steps.changelog.outputs.changes }}
+          token: ${{ github.token }}
+
+      - name: Write CHANGELOG.md
+        uses: requarks/changelog-action@v1
+        with:
+          token: ${{ github.token }}
+          fromTag: ${{ steps.semver.outputs.next }}
+          toTag: ${{ steps.semver.outputs.current }}
+          writeToFile: true
+
+      - name: Commit CHANGELOG.md
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          branch: master
+          commit_message: "docs: update CHANGELOG.md for ${{ steps.semver.outputs.next }} [skip ci]"
+          file_pattern: CHANGELOG.md
+
+  # ── Build and push container images ──────────────────────────────
+  build-api:
+    name: API image
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ${{ env.IMAGE_PREFIX }}/consentos-api
+          images: ghcr.io/consentos/consentos-api
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.newStrict }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.newStrict }}
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
@@ -54,26 +111,29 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # ── Build and push the scanner image ─────────────────────────────
-  scanner:
+  build-scanner:
     name: Scanner image
+    needs: version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ${{ env.IMAGE_PREFIX }}/consentos-scanner
+          images: ghcr.io/consentos/consentos-scanner
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.newStrict }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.newStrict }}
             type=raw,value=latest
 
       - uses: docker/build-push-action@v6
@@ -84,26 +144,29 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  # ── Build and push the admin UI + banner image ───────────────────
-  admin-ui:
+  build-admin-ui:
     name: Admin UI image
+    needs: version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ${{ env.IMAGE_PREFIX }}/consentos-admin-ui
+          images: ghcr.io/consentos/consentos-admin-ui
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.newStrict }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.version.outputs.newStrict }}
             type=raw,value=latest
 
       # Context is the repo root — the admin-ui Dockerfile pulls in
