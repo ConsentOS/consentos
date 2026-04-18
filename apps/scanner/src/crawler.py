@@ -68,11 +68,13 @@ def _build_consent_cookie(url: str) -> dict:
         "bannerVersion": "scanner",
     }
     value = quote(json.dumps(state, separators=(",", ":")), safe="")
+    # Playwright's ``add_cookies`` accepts EITHER ``url`` (from which
+    # it derives domain/path/secure) OR explicit ``domain`` + ``path``
+    # — but not both. Using ``url`` is simplest.
     return {
         "name": _CONSENT_COOKIE_NAME,
         "value": value,
         "url": url,
-        "path": "/",
         "expires": time.time() + 365 * 86400,
         "sameSite": "Lax",
     }
@@ -201,6 +203,9 @@ class CookieCrawler:
         script_cookies: dict[str, str] = {}  # cookie name → script URL
         initiator_map: dict[str, str] = {}  # request URL → initiating URL
         initiator_chains: dict[str, list[str]] = {}  # cookie name → chain
+        # Cookies discovered directly from Set-Cookie response headers.
+        # Keyed by (name, domain) so they can be merged with CDP results.
+        header_cookies: dict[tuple[str, str], DiscoveredCookie] = {}
 
         context: BrowserContext | None = None
         try:
@@ -236,7 +241,9 @@ class CookieCrawler:
 
             page.on("request", _on_request)
 
-            # Track Set-Cookie headers from responses
+            # Track Set-Cookie headers from responses and create
+            # DiscoveredCookie entries directly — CDP's context.cookies()
+            # may not enumerate cross-domain cookies.
             async def _on_response(response: Response) -> None:
                 try:
                     headers = await response.all_headers()
@@ -247,25 +254,67 @@ class CookieCrawler:
                         initiator = _get_script_initiator(request)
                         # Build the initiator chain for this request
                         chain = _build_initiator_chain(request.url, initiator_map)
+                        resp_domain = urlparse(response.url).hostname or ""
                         for cookie_str in set_cookie.split("\n"):
                             name = cookie_str.split("=")[0].strip()
                             if name:
                                 if initiator:
                                     script_cookies[name] = initiator
                                 initiator_chains[name] = chain
+                                # Parse optional Domain attribute from
+                                # the Set-Cookie header; fall back to
+                                # the response hostname.
+                                domain = resp_domain
+                                for part in cookie_str.split(";")[1:]:
+                                    part = part.strip()
+                                    if part.lower().startswith("domain="):
+                                        domain = part.split("=", 1)[1].strip()
+                                        break
+                                key = (name, domain)
+                                if key not in header_cookies:
+                                    header_cookies[key] = DiscoveredCookie(
+                                        name=name,
+                                        domain=domain,
+                                        storage_type="cookie",
+                                        script_source=initiator,
+                                        page_url=url,
+                                        initiator_chain=chain,
+                                    )
                 except Exception:
                     pass  # Non-critical — response may have been aborted
 
             page.on("response", _on_response)
 
-            # Navigate
-            await page.goto(url, wait_until="domcontentloaded", timeout=self._timeout_ms)
-            # Allow additional time for scripts to set cookies after DOM load.
-            await page.wait_for_timeout(3000)
+            # Navigate — networkidle waits until ≤2 active connections for
+            # 500ms, which catches the GA beacon round-trip that
+            # domcontentloaded misses.
+            await page.goto(url, wait_until="networkidle", timeout=self._timeout_ms)
+            # Safety margin for late-firing scripts (e.g. deferred GTM tags).
+            await page.wait_for_timeout(5000)
 
-            # Enumerate browser cookies via CDP
+            # First pass — enumerate browser cookies via CDP.
             cdp_cookies = await context.cookies()
+
+            # Second pass — wait a further 2 seconds for any delayed
+            # Set-Cookie headers, then merge newly appeared cookies.
+            await page.wait_for_timeout(2000)
+            delayed_cookies = await context.cookies()
+
+            # Merge: index first-pass cookies by (name, domain), then
+            # add any that only appeared in the second pass.
+            seen_keys: set[tuple[str, str]] = set()
+            all_cdp_cookies: list[dict] = []
             for c in cdp_cookies:
+                key = (c["name"], c["domain"])
+                seen_keys.add(key)
+                all_cdp_cookies.append(c)
+            for c in delayed_cookies:
+                key = (c["name"], c["domain"])
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    all_cdp_cookies.append(c)
+
+            for c in all_cdp_cookies:
                 result.cookies.append(
                     DiscoveredCookie(
                         name=c["name"],
@@ -282,6 +331,13 @@ class CookieCrawler:
                         initiator_chain=initiator_chains.get(c["name"], []),
                     )
                 )
+
+            # Merge cookies seen in Set-Cookie headers but NOT in the
+            # CDP cookie jar (e.g. cross-domain cookies that the browser
+            # scoped to a different origin).
+            for key, hc in header_cookies.items():
+                if key not in seen_keys:
+                    result.cookies.append(hc)
 
             # Enumerate localStorage
             ls_items = await page.evaluate("""() => {

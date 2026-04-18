@@ -75,6 +75,13 @@ async def _fetch_sitemap(
         if resp.status_code != 200:
             return []
 
+        # SPAs with catch-all nginx/Caddy rules return 200 + text/html
+        # for /sitemap.xml. Don't try to parse HTML as XML.
+        content_type = resp.headers.get("content-type", "")
+        if "html" in content_type and "xml" not in content_type:
+            logger.debug("Sitemap %s returned HTML, skipping", url)
+            return []
+
         root = ElementTree.fromstring(resp.text)
 
         # Check if it's a sitemap index

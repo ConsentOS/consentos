@@ -129,6 +129,7 @@ export interface SiteConfig {
   scan_enabled: boolean;
   scan_frequency_hours: number;
   scan_max_pages: number;
+  scan_schedule_cron: string | null;
   /**
    * Cookie categories the banner should display. ``null`` means
    * "inherit from the cascade" (group → org → system default of all

@@ -27,7 +27,7 @@ services:
     command:
       - "sh"
       - "-c"
-      - "python -m alembic upgrade head && python -m src.cli.bootstrap_admin"
+      - "python -m alembic upgrade head && python -m src.cli.bootstrap_admin && python -m src.cli.seed_known_cookies"
     restart: "no"
     depends_on:
       postgres:

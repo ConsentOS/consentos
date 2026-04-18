@@ -43,6 +43,7 @@ const BASE_CONFIG: SiteConfig = {
   scan_enabled: true,
   scan_frequency_hours: 168,
   scan_max_pages: 50,
+  scan_schedule_cron: null,
   enabled_categories: null,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',

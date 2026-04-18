@@ -42,11 +42,35 @@ def _make_mock_page(
     return page
 
 
-def _make_mock_context(page, cookies: list[dict] | None = None):
-    """Build a mock BrowserContext."""
+def _make_mock_context(
+    page,
+    cookies: list[dict] | None = None,
+    delayed_cookies: list[dict] | None = None,
+):
+    """Build a mock BrowserContext.
+
+    *cookies* is returned on the first ``context.cookies()`` call (the
+    initial CDP enumeration).  *delayed_cookies* is returned on the
+    second call (the delayed pass); defaults to the same list so
+    existing tests need no changes.
+    """
     context = AsyncMock()
     context.new_page = AsyncMock(return_value=page)
-    context.cookies = AsyncMock(return_value=cookies or [])
+    first = cookies or []
+    second = delayed_cookies if delayed_cookies is not None else first
+    # The crawler calls context.cookies() twice per page (initial +
+    # delayed pass). Using a cycling function instead of a fixed-length
+    # side_effect list so multi-page tests don't exhaust the mock.
+    _cycle = [first, second]
+    _call_count = 0
+
+    async def _cycling_cookies(*_args, **_kwargs):
+        nonlocal _call_count
+        result = _cycle[_call_count % len(_cycle)]
+        _call_count += 1
+        return result
+
+    context.cookies = AsyncMock(side_effect=_cycling_cookies)
     context.clear_cookies = AsyncMock()
     context.close = AsyncMock()
     return context
@@ -373,6 +397,44 @@ class TestCrawlPage:
         call_kwargs = browser.new_context.call_args[1]
         assert call_kwargs["user_agent"] == "CMPBot/1.0"
 
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_two_pass_cookie_collection_merges_delayed(self):
+        """Cookies appearing only in the second CDP pass are still discovered."""
+        first_pass = [
+            {"name": "_ga", "domain": ".example.com", "value": "GA1.2.12345"},
+        ]
+        second_pass = [
+            {"name": "_ga", "domain": ".example.com", "value": "GA1.2.12345"},
+            {"name": "_gid", "domain": ".example.com", "value": "GID.99"},
+        ]
+
+        page = _make_mock_page()
+        context = _make_mock_context(page, cookies=first_pass, delayed_cookies=second_pass)
+        browser = _make_mock_browser(context)
+
+        crawler = CookieCrawler()
+        result = await crawler._crawl_page(browser, "https://example.com/")
+
+        cookie_names = [c.name for c in result.cookies if c.storage_type == "cookie"]
+        assert "_ga" in cookie_names
+        assert "_gid" in cookie_names
+        # _ga must not be duplicated
+        assert cookie_names.count("_ga") == 1
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_uses_networkidle_wait(self):
+        """page.goto must use wait_until='networkidle'."""
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        browser = _make_mock_browser(context)
+
+        crawler = CookieCrawler()
+        await crawler._crawl_page(browser, "https://example.com/")
+
+        page.goto.assert_awaited_once()
+        call_kwargs = page.goto.call_args[1]
+        assert call_kwargs.get("wait_until") == "networkidle"
+
 
 # ── CookieCrawler.crawl_site ───────────────────────────────────────────
 
@@ -457,7 +519,9 @@ class TestBuildConsentCookie:
         """``url`` lets Playwright derive domain / path / secure."""
         cookie = _build_consent_cookie("https://example.com/page")
         assert cookie["url"] == "https://example.com/page"
-        assert cookie["path"] == "/"
+        # ``path`` is NOT set explicitly — Playwright derives it from ``url``.
+        # Setting both would cause ``add_cookies`` to reject the cookie.
+        assert "path" not in cookie
 
     def test_cookie_value_decodes_to_consent_state_with_all_categories(self):
         import json as _json
