@@ -11,7 +11,6 @@ import {
 import Layout from './components/Layout';
 import { trackPageView } from './services/analytics';
 import ProtectedRoute from './components/ProtectedRoute';
-import ComplianceDashboardPage from './pages/ComplianceDashboardPage';
 import LoginPage from './pages/LoginPage';
 import SettingsPage from './pages/SettingsPage';
 import SiteDetailPage from './pages/SiteDetailPage';
@@ -58,7 +57,6 @@ function AppRoutes() {
         <Route path="/sites" element={<SitesPage />} />
         <Route path="/sites/:siteId" element={<SiteDetailPage />} />
         <Route path="/groups/:groupId" element={<SiteGroupDetailPage />} />
-        <Route path="/compliance" element={<ComplianceDashboardPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         {extensionPages
           .filter((p) => p.protected !== false)

@@ -4,7 +4,6 @@ import { useParams } from 'react-router-dom';
 
 import { getSite, getSiteConfig, updateSiteConfig } from '../api/sites';
 import SiteCategoriesTab from '../components/SiteCategoriesTab';
-import SiteComplianceTab from '../components/SiteComplianceTab';
 import SiteConfigTab from '../components/SiteConfigTab';
 import SiteCookiesTab from '../components/SiteCookiesTab';
 import SiteOverviewTab from '../components/SiteOverviewTab';
@@ -22,7 +21,6 @@ const CORE_TABS: { id: string; label: string; order: number }[] = [
   { id: 'banner', label: 'Banner', order: 40 },
   { id: 'translations', label: 'Translations', order: 50 },
   { id: 'scanner', label: 'Scans', order: 60 },
-  { id: 'compliance', label: 'Compliance', order: 70 },
 ];
 
 export default function SiteDetailPage() {
@@ -105,7 +103,6 @@ export default function SiteDetailPage() {
       )}
       {activeTab === 'translations' && siteId && <SiteTranslationsTab siteId={siteId} />}
       {activeTab === 'scanner' && siteId && <SiteScannerTab siteId={siteId} />}
-      {activeTab === 'compliance' && siteId && <SiteComplianceTab siteId={siteId} config={config ?? null} />}
       {/* Extension tabs */}
       {extensionTabs.map(
         (ext) =>
