@@ -174,6 +174,26 @@ def classify_cookie(
 
     This is a pure function — all data is passed in, no DB calls.
     """
+    # 0. ConsentOS's own cookies are always necessary. The banner's
+    #    blocker already treats ``_consentos_*`` as exempt; the
+    #    classifier must agree so the admin UI shows them in the
+    #    right category without requiring a known-cookies DB entry.
+    if cookie_name.startswith("_consentos_"):
+        necessary = next(
+            (cat for cat in category_map.values() if cat.slug == "necessary"),
+            None,
+        )
+        return ClassificationResult(
+            cookie_name=cookie_name,
+            cookie_domain=cookie_domain,
+            category_id=necessary.id if necessary else None,
+            category_slug="necessary",
+            vendor="ConsentOS",
+            description="ConsentOS consent management cookie.",
+            match_source=MatchSource.KNOWN_EXACT,
+            matched=True,
+        )
+
     # 1. Check allow-list first (site-specific overrides)
     allow_match = _match_allow_list(cookie_name, cookie_domain, allow_list)
     if allow_match:

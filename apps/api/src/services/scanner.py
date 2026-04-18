@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.cookie import Cookie
+from src.models.cookie import Cookie, CookieCategory
 from src.models.scan import ScanJob, ScanResult
 from src.models.site import Site
 from src.schemas.scanner import (
@@ -261,13 +261,23 @@ async def sync_scan_results_to_cookies(
     """Upsert scan results into the site's cookie inventory.
 
     Creates new Cookie records for newly discovered items or updates
-    last_seen_at for existing ones. Returns the number of new cookies.
+    ``last_seen_at`` for existing ones. When ``auto_category`` is set
+    on the scan result and the cookie doesn't already have a
+    manually-assigned category, the auto-classified category is
+    propagated to the cookie inventory so it shows up categorised in
+    the admin UI without requiring manual review.
+
+    Returns the number of new cookies.
     """
     results = await db.execute(select(ScanResult).where(ScanResult.scan_job_id == scan_job_id))
     items = list(results.scalars().all())
 
     now_iso = datetime.now(UTC).isoformat()
     new_count = 0
+
+    # Pre-load the category slug → id mapping so we don't query per cookie.
+    cat_rows = await db.execute(select(CookieCategory))
+    slug_to_id: dict[str, uuid.UUID] = {cat.slug: cat.id for cat in cat_rows.scalars().all()}
 
     for item in items:
         existing = await db.execute(
@@ -280,14 +290,21 @@ async def sync_scan_results_to_cookies(
         )
         cookie = existing.scalar_one_or_none()
 
+        # Resolve the auto-category slug to a category_id.
+        auto_cat_id = slug_to_id.get(item.auto_category) if item.auto_category else None
+
         if cookie:
             cookie.last_seen_at = now_iso
+            # Back-fill the category if not manually assigned yet.
+            if auto_cat_id and not cookie.category_id:
+                cookie.category_id = auto_cat_id
         else:
             cookie = Cookie(
                 site_id=site_id,
                 name=item.cookie_name,
                 domain=item.cookie_domain,
                 storage_type=item.storage_type,
+                category_id=auto_cat_id,
                 review_status="pending",
                 first_seen_at=now_iso,
                 last_seen_at=now_iso,

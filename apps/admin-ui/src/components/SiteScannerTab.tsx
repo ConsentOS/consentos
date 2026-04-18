@@ -2,15 +2,32 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 
 import { getScan, getScanDiff, listScans, triggerScan } from '../api/scanner';
+import { getSiteConfig, updateSiteConfig } from '../api/sites';
 import { trackFeatureUsage } from '../services/analytics';
-import type { CookieDiffItem, ScanDiff, ScanJob, ScanJobDetail, ScanResult } from '../types/api';
+import type { CookieDiffItem, ScanDiff, ScanJob, ScanJobDetail, ScanResult, SiteConfig } from '../types/api';
 import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
+import { Card } from './ui/card';
 import { LoadingState } from './ui/loading-state';
+import { Select } from './ui/select';
 
 interface Props {
   siteId: string;
+}
+
+const SCHEDULE_OPTIONS: { value: string; label: string; cron: string | null }[] = [
+  { value: 'disabled', label: 'Disabled', cron: null },
+  { value: 'daily', label: 'Daily', cron: '0 3 * * *' },
+  { value: 'weekly', label: 'Weekly', cron: '0 3 * * 0' },
+  { value: 'fortnightly', label: 'Fortnightly', cron: '0 3 1,15 * *' },
+  { value: 'monthly', label: 'Monthly', cron: '0 3 1 * *' },
+];
+
+function cronToScheduleValue(cron: string | null | undefined): string {
+  if (!cron) return 'disabled';
+  const match = SCHEDULE_OPTIONS.find((o) => o.cron === cron);
+  return match?.value ?? 'custom';
 }
 
 function statusVariant(status: string): 'warning' | 'info' | 'success' | 'error' | 'neutral' {
@@ -183,6 +200,45 @@ export default function SiteScannerTab({ siteId }: Props) {
   const queryClient = useQueryClient();
   const [expandedScanId, setExpandedScanId] = useState<string | null>(null);
 
+  const { data: config } = useQuery<SiteConfig>({
+    queryKey: ['sites', siteId, 'config'],
+    queryFn: () => getSiteConfig(siteId),
+  });
+
+  const currentCron = config?.scan_schedule_cron ?? null;
+  const savedValue = cronToScheduleValue(currentCron);
+  const [selectedSchedule, setSelectedSchedule] = useState<string | null>(null);
+  const [customCron, setCustomCron] = useState('');
+
+  // Use local selection if the user has interacted, otherwise fall
+  // back to what's saved on the server.
+  const activeValue = selectedSchedule ?? savedValue;
+  const showCustomInput = activeValue === 'custom';
+
+  const scheduleMutation = useMutation({
+    mutationFn: (cron: string | null) => updateSiteConfig(siteId, { scan_schedule_cron: cron } as Partial<SiteConfig>),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sites', siteId, 'config'] });
+      trackFeatureUsage('scan', 'schedule_change', { site_id: siteId });
+      setSelectedSchedule(null); // reset to server state
+    },
+  });
+
+  const handleScheduleChange = (value: string) => {
+    setSelectedSchedule(value);
+    if (value === 'custom') {
+      setCustomCron(currentCron ?? '');
+      return;
+    }
+    const option = SCHEDULE_OPTIONS.find((o) => o.value === value);
+    scheduleMutation.mutate(option?.cron ?? null);
+  };
+
+  const handleCustomSave = () => {
+    const trimmed = customCron.trim();
+    scheduleMutation.mutate(trimmed || null);
+  };
+
   const { data: scans, isLoading } = useQuery<ScanJob[]>({
     queryKey: ['scans', siteId],
     queryFn: () => listScans(siteId),
@@ -202,6 +258,64 @@ export default function SiteScannerTab({ siteId }: Props) {
 
   return (
     <div>
+      {/* Scan schedule */}
+      <Card className="mb-6 p-5">
+        <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">Scan Schedule</h3>
+        <p className="mb-3 text-xs text-text-secondary">
+          Scheduled scans run automatically and re-discover cookies so your inventory stays
+          current. Select a preset or enter a custom cron expression.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[180px]">
+            <Select
+              value={activeValue}
+              onChange={(e) => handleScheduleChange(e.target.value)}
+              disabled={scheduleMutation.isPending}
+            >
+              {SCHEDULE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+              <option value="custom">Custom cron</option>
+            </Select>
+          </div>
+          {showCustomInput && (
+            <>
+              <input
+                type="text"
+                className="rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-text-tertiary focus:border-copper focus:outline-none"
+                placeholder="0 3 * * 0"
+                value={customCron}
+                onChange={(e) => setCustomCron(e.target.value)}
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleCustomSave}
+                disabled={scheduleMutation.isPending || !customCron.trim()}
+              >
+                Save
+              </Button>
+              <a
+                href="https://crontab.guru"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-copper hover:underline"
+              >
+                Need help? Use crontab.guru &rarr;
+              </a>
+            </>
+          )}
+          {scheduleMutation.isPending && (
+            <span className="text-xs text-text-secondary">Saving…</span>
+          )}
+        </div>
+        {currentCron && (
+          <p className="mt-2 text-xs text-text-secondary">
+            Current schedule: <code className="rounded bg-mist px-1.5 py-0.5 font-mono">{currentCron}</code>
+          </p>
+        )}
+      </Card>
+
       {/* Header with trigger button */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-heading text-lg font-semibold text-foreground">Cookie Scans</h2>
