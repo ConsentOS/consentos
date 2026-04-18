@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useMemo } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { getSite, getSiteConfig, updateSiteConfig } from '../api/sites';
 import SiteCategoriesTab from '../components/SiteCategoriesTab';
@@ -25,7 +25,15 @@ const CORE_TABS: { id: string; label: string; order: number }[] = [
 
 export default function SiteDetailPage() {
   const { siteId } = useParams<{ siteId: string }>();
-  const [activeTab, setActiveTab] = useState<string>('overview');
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Persist the active tab in the URL hash so a page refresh restores it.
+  const activeTab = location.hash.replace('#', '') || 'overview';
+  const setActiveTab = useCallback(
+    (tab: string) => navigate({ hash: tab }, { replace: true }),
+    [navigate],
+  );
 
   const extensionTabs = useMemo(() => getSiteDetailTabs(), []);
   const allTabs = useMemo(() => {

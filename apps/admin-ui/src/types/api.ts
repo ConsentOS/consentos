@@ -726,3 +726,28 @@ export interface ConsentReceiptResponse {
   banner_version_hash: string | null;
   created_at: string;
 }
+
+export interface ConsentRecord {
+  id: string;
+  site_id: string;
+  visitor_id: string;
+  action: string;
+  categories_accepted: string[];
+  categories_rejected: string[] | null;
+  tc_string: string | null;
+  gcm_state: Record<string, string> | null;
+  gpp_string: string | null;
+  gpc_detected: boolean | null;
+  gpc_honoured: boolean | null;
+  page_url: string | null;
+  country_code: string | null;
+  region_code: string | null;
+  consented_at: string;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}

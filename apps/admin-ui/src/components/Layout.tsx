@@ -6,6 +6,7 @@ import { getNavItems } from '../extensions/registry';
 
 const CORE_NAV_ITEMS = [
   { path: '/sites', label: 'Sites', order: 10 },
+  { path: '/consent', label: 'Consent Records', order: 15 },
   { path: '/settings', label: 'Settings', order: 90 },
 ];
 

@@ -1,7 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
@@ -11,6 +11,7 @@ from src.models.site import Site
 from src.schemas.auth import CurrentUser
 from src.schemas.consent import (
     ConsentRecordCreate,
+    ConsentRecordListResponse,
     ConsentRecordResponse,
     ConsentVerifyResponse,
 )
@@ -84,6 +85,63 @@ async def _load_record_for_org(
             detail="Consent record not found",
         )
     return record
+
+
+@router.get("/", response_model=ConsentRecordListResponse)
+async def list_consent_records(
+    site_id: uuid.UUID = Query(..., description="Filter by site"),
+    visitor_id: str | None = Query(None, description="Filter by visitor ID (exact match)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    current_user: CurrentUser = Depends(require_role("owner", "admin", "editor", "viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List consent records for a site, with optional visitor_id filter.
+
+    Tenant-isolated — the site must belong to the caller's organisation.
+    Returns newest records first.
+    """
+    # Verify site belongs to the caller's org.
+    site = (
+        await db.execute(
+            select(Site).where(
+                Site.id == site_id,
+                Site.organisation_id == current_user.organisation_id,
+                Site.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if site is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+
+    base = select(ConsentRecord).where(ConsentRecord.site_id == site_id)
+    count_base = (
+        select(func.count()).select_from(ConsentRecord).where(ConsentRecord.site_id == site_id)
+    )
+
+    if visitor_id:
+        base = base.where(ConsentRecord.visitor_id == visitor_id)
+        count_base = count_base.where(ConsentRecord.visitor_id == visitor_id)
+
+    total = await db.scalar(count_base) or 0
+    items = (
+        (
+            await db.execute(
+                base.order_by(ConsentRecord.consented_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "items": list(items),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.get("/{consent_id}", response_model=ConsentRecordResponse)

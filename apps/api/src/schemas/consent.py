@@ -50,6 +50,15 @@ class ConsentRecordResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ConsentRecordListResponse(BaseModel):
+    """Paginated list of consent records."""
+
+    items: list[ConsentRecordResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 class ConsentVerifyResponse(BaseModel):
     """Audit proof that a consent record exists."""
 
