@@ -690,6 +690,27 @@ Regardless of deployment method, verify these before going live:
 
 ---
 
+## Password Reset
+
+If you've forgotten your password and can't log in to the admin UI, reset it from the host machine:
+
+```bash
+docker exec consentos-api python -m src.cli.reset_password \
+  --email admin@example.com \
+  --password new-secret-here
+```
+
+The password must be at least 8 characters. The change takes effect immediately — no restart needed. On Kubernetes, run it as a one-off pod:
+
+```bash
+kubectl exec -it deploy/consentos-api -n consentos -- \
+  python -m src.cli.reset_password --email admin@example.com --password new-secret-here
+```
+
+Once logged back in, you can change your email and password from the **Account** page (click your name in the top nav → Account).
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |

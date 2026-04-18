@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from jose import JWTError, jwt
 
 from src.config.settings import get_settings
@@ -140,7 +141,11 @@ class TestAuthEndpoints:
         response = await client.get("/api/v1/auth/me")
         assert response.status_code == 401
 
-    async def test_me_with_valid_token(self, client):
+    async def test_me_with_valid_token(self, app):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.db import get_db
+
         user_id = uuid.uuid4()
         org_id = uuid.uuid4()
         token = create_access_token(
@@ -149,10 +154,34 @@ class TestAuthEndpoints:
             role="editor",
             email="user@example.com",
         )
-        response = await client.get(
-            "/api/v1/auth/me",
-            headers={"Authorization": f"Bearer {token}"},
-        )
+
+        mock_user = MagicMock()
+        mock_user.id = user_id
+        mock_user.organisation_id = org_id
+        mock_user.email = "user@example.com"
+        mock_user.full_name = "Test User"
+        mock_user.role = "editor"
+        mock_user.deleted_at = None
+
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_session.execute.return_value = mock_result
+
+        async def _override():
+            yield mock_session
+
+        app.dependency_overrides[get_db] = _override
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        app.dependency_overrides.pop(get_db, None)
+
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == str(user_id)

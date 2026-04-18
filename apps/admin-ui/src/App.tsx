@@ -11,6 +11,7 @@ import {
 import Layout from './components/Layout';
 import { trackPageView } from './services/analytics';
 import ProtectedRoute from './components/ProtectedRoute';
+import AccountPage from './pages/AccountPage';
 import ConsentRecordsPage from './pages/ConsentRecordsPage';
 import LoginPage from './pages/LoginPage';
 import SettingsPage from './pages/SettingsPage';
@@ -59,6 +60,7 @@ function AppRoutes() {
         <Route path="/sites/:siteId" element={<SiteDetailPage />} />
         <Route path="/groups/:groupId" element={<SiteGroupDetailPage />} />
         <Route path="/consent" element={<ConsentRecordsPage />} />
+        <Route path="/account" element={<AccountPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         {extensionPages
           .filter((p) => p.protected !== false)
