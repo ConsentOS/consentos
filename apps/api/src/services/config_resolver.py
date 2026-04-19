@@ -156,6 +156,7 @@ def build_public_config(
         # Public name is ``enabled_categories`` here; the banner schema
         # converts that to ``enabledCategories`` when it serialises.
         "enabled_categories": _normalise_enabled_categories(resolved.get("enabled_categories")),
+        "consent_bridge_url": resolved.get("consent_bridge_url"),
     }
 
 
@@ -177,6 +178,8 @@ CONFIG_FIELDS = (
     "terms_url",
     "consent_expiry_days",
     "enabled_categories",
+    "consent_sharing_enabled",
+    "consent_bridge_url",
 )
 
 

@@ -62,6 +62,8 @@ export interface SiteGroupConfig {
   scan_schedule_cron: string | null;
   scan_max_pages: number | null;
   consent_expiry_days: number | null;
+  consent_sharing_enabled: boolean | null;
+  consent_bridge_url: string | null;
   created_at: string;
   updated_at: string;
 }

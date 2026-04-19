@@ -57,6 +57,8 @@ export default function SiteGroupDetailPage() {
   const [gcmEnabled, setGcmEnabled] = useState<string>('');
   const [shopifyEnabled, setShopifyEnabled] = useState<string>('');
   const [consentExpiry, setConsentExpiry] = useState<string>('');
+  const [consentSharing, setConsentSharing] = useState<string>('');
+  const [bridgeUrl, setBridgeUrl] = useState<string>('');
   const [privacyUrl, setPrivacyUrl] = useState<string>('');
   const [termsUrl, setTermsUrl] = useState<string>('');
 
@@ -79,6 +81,14 @@ export default function SiteGroupDetailPage() {
       config.shopify_privacy_enabled === null ? '' : config.shopify_privacy_enabled ? 'true' : 'false',
     );
     setConsentExpiry(config.consent_expiry_days?.toString() ?? '');
+    setConsentSharing(
+      config.consent_sharing_enabled == null
+        ? ''
+        : config.consent_sharing_enabled
+          ? 'true'
+          : 'false',
+    );
+    setBridgeUrl(config.consent_bridge_url ?? '');
     setPrivacyUrl(config.privacy_policy_url ?? '');
     setTermsUrl(config.terms_url ?? '');
     setGppEnabled(config.gpp_enabled === null || config.gpp_enabled === undefined ? '' : config.gpp_enabled ? 'true' : 'false');
@@ -108,6 +118,8 @@ export default function SiteGroupDetailPage() {
       gcm_enabled: gcmEnabled === '' ? null : gcmEnabled === 'true',
       shopify_privacy_enabled: shopifyEnabled === '' ? null : shopifyEnabled === 'true',
       consent_expiry_days: consentExpiry === '' ? null : Number(consentExpiry),
+      consent_sharing_enabled: consentSharing === '' ? null : consentSharing === 'true',
+      consent_bridge_url: bridgeUrl || null,
       privacy_policy_url: privacyUrl || null,
       terms_url: termsUrl || null,
       gpp_enabled: gppEnabled === '' ? null : gppEnabled === 'true',
@@ -226,6 +238,38 @@ export default function SiteGroupDetailPage() {
                     placeholder="Inherit from org/system"
                   />
                 </FormField>
+
+                <FormField label="Cross-domain consent sharing">
+                  <Select
+                    value={consentSharing}
+                    onChange={(e) => setConsentSharing(e.target.value)}
+                  >
+                    <option value="">Inherit from org/system</option>
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                  </Select>
+                  <p className="mt-1 text-xs text-text-secondary">
+                    When enabled, consent given on one site in this group is
+                    automatically shared with all other sites in the group via a
+                    secure iframe bridge. Works across different domains.
+                  </p>
+                </FormField>
+
+                {consentSharing === 'true' && (
+                  <FormField label="Bridge domain">
+                    <Input
+                      type="url"
+                      value={bridgeUrl}
+                      onChange={(e) => setBridgeUrl(e.target.value)}
+                      placeholder="https://cmp.consentos.dev"
+                    />
+                    <p className="mt-1 text-xs text-text-secondary">
+                      The shared domain all sites in this group embed the consent
+                      bridge iframe from. All sites must use the same bridge domain
+                      for cross-domain consent to work.
+                    </p>
+                  </FormField>
+                )}
 
                 <FormField label="Default privacy policy URL">
                   <Input

@@ -15,6 +15,7 @@ from src.routers import (
     compliance,
     config,
     consent,
+    consent_bridge,
     cookies,
     org_config,
     organisations,
@@ -141,6 +142,9 @@ def create_app() -> FastAPI:
     app.include_router(cookies.router, prefix=api_prefix)
     app.include_router(translations.router, prefix=api_prefix)
     app.include_router(translations.public_router, prefix=api_prefix)
+
+    # Cross-domain consent bridge (no api_prefix — served at /consent-bridge)
+    app.include_router(consent_bridge.router)
 
     # Discover and mount enterprise extensions (no-op in CE mode)
     discover_extensions()
