@@ -25,7 +25,7 @@ def _mock_group(**overrides):
     group = MagicMock()
     group.id = overrides.get("id", uuid.uuid4())
     group.organisation_id = overrides.get("organisation_id", ORG_ID)
-    group.name = overrides.get("name", "Steve Madden")
+    group.name = overrides.get("name", "EU Storefront")
     group.description = overrides.get("description")
     group.deleted_at = None
     group.created_at = datetime.now(UTC)
@@ -103,23 +103,23 @@ class TestSiteGroupCRUD:
         async with await _client(mock_app, db) as client:
             resp = await client.post(
                 "/api/v1/site-groups/",
-                json={"name": "Steve Madden"},
+                json={"name": "EU Storefront"},
                 headers=_auth_headers(),
             )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["name"] == "Steve Madden"
+        assert data["name"] == "EU Storefront"
         assert data["site_count"] == 0
 
     @pytest.mark.asyncio
     async def test_create_site_group_conflict(self, mock_app):
         """POST /site-groups/ returns 409 when name exists."""
-        existing = _mock_group(name="Steve Madden")
+        existing = _mock_group(name="EU Storefront")
         db = _mock_db_sequence(existing)
         async with await _client(mock_app, db) as client:
             resp = await client.post(
                 "/api/v1/site-groups/",
-                json={"name": "Steve Madden"},
+                json={"name": "EU Storefront"},
                 headers=_auth_headers(),
             )
         assert resp.status_code == 409
@@ -127,7 +127,7 @@ class TestSiteGroupCRUD:
     @pytest.mark.asyncio
     async def test_list_site_groups(self, mock_app):
         """GET /site-groups/ returns groups with site counts."""
-        group = _mock_group(name="Steve Madden")
+        group = _mock_group(name="EU Storefront")
         row = MagicMock()
         row.SiteGroup = group
         row.site_count = 3
@@ -141,14 +141,14 @@ class TestSiteGroupCRUD:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
-        assert data[0]["name"] == "Steve Madden"
+        assert data[0]["name"] == "EU Storefront"
         assert data[0]["site_count"] == 3
 
     @pytest.mark.asyncio
     async def test_get_site_group(self, mock_app):
         """GET /site-groups/{id} returns a single group."""
         group_id = uuid.uuid4()
-        group = _mock_group(id=group_id, description="SM brand")
+        group = _mock_group(id=group_id, description="EU regional sites")
         db = _mock_db_sequence(group, 2)  # group lookup, site count
         async with await _client(mock_app, db) as client:
             resp = await client.get(
@@ -157,7 +157,7 @@ class TestSiteGroupCRUD:
             )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["description"] == "SM brand"
+        assert data["description"] == "EU regional sites"
         assert data["site_count"] == 2
 
     @pytest.mark.asyncio

@@ -182,7 +182,7 @@ export default function SitesPage() {
               required
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
-              placeholder="e.g. Steve Madden"
+              placeholder="e.g. EU Storefront"
             />
           </FormField>
 
