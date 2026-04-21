@@ -58,6 +58,11 @@ line-length = 100
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
 ignore = ["B008"]  # Depends() in FastAPI defaults is idiomatic
 
+[tool.ruff.lint.per-file-ignores]
+# Inline HTML templates — line length is unavoidable.
+"src/routers/hosted_pages.py" = ["E501"]
+"src/routers/consent_bridge.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

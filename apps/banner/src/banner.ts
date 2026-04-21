@@ -236,8 +236,9 @@ async function init(): Promise<void> {
   };
 
   if (existingConsent && !reconsentRequired) {
-    // Banner isn't shown; expose the floating button straight away.
-    showPreferencesButton(config, t);
+    // Banner isn't shown. Consent management happens on the hosted
+    // cookies page (/c/<site-id>/cookies) — site owners link to it
+    // from their footer. No floating button needed.
     return;
   }
 
@@ -275,20 +276,61 @@ async function init(): Promise<void> {
  * missing, only those categories need consent from the user.
  */
 function installCmpApi(config: SiteConfig): void {
+  const enabled = resolveEnabledCategories(config);
+  const nonEssential = nonEssentialFor(enabled);
+
+  function applyConsent(accepted: CategorySlug[]): void {
+    const rejected = nonEssential.filter((c) => !accepted.includes(c));
+    handleConsent(accepted, rejected, config);
+  }
+
   window.ConsentOS = {
-    identifyUser: async (jwt: string): Promise<string[]> => {
-      const missing = await _hooks.identifyUser(jwt, config);
-      return missing;
-    },
-    clearIdentity: (): void => {
-      _hooks.clearIdentity();
-    },
     showPreferences: (): void => {
       if (_openPreferences) {
         _openPreferences();
       } else {
         console.warn('[ConsentOS] showPreferences called before init complete');
       }
+    },
+    showBanner: (): void => {
+      if (_openPreferences) _openPreferences();
+    },
+    acceptAll: (): void => {
+      applyConsent([...enabled]);
+    },
+    rejectAll: (): void => {
+      applyConsent(['necessary']);
+    },
+    enableCategory: (category: string): void => {
+      const current = (readConsent()?.accepted ?? ['necessary']) as string[];
+      if (!current.includes(category)) {
+        applyConsent([...current, category] as CategorySlug[]);
+      }
+    },
+    disableCategory: (category: string): void => {
+      if (category === 'necessary') return;
+      const current = (readConsent()?.accepted ?? ['necessary']) as string[];
+      applyConsent(current.filter((c) => c !== category) as CategorySlug[]);
+    },
+    toggleCategory: (category: string): void => {
+      const current = (readConsent()?.accepted ?? ['necessary']) as string[];
+      if (current.includes(category)) {
+        window.ConsentOS.disableCategory(category);
+      } else {
+        window.ConsentOS.enableCategory(category);
+      }
+    },
+    getAcceptedCategories: (): string[] => {
+      return (readConsent()?.accepted ?? ['necessary']) as string[];
+    },
+    isCategoryAccepted: (category: string): boolean => {
+      return ((readConsent()?.accepted ?? ['necessary']) as string[]).includes(category);
+    },
+    identifyUser: async (jwt: string): Promise<string[]> => {
+      return _hooks.identifyUser(jwt, config);
+    },
+    clearIdentity: (): void => {
+      _hooks.clearIdentity();
     },
   };
 }
@@ -583,11 +625,6 @@ function handleConsent(
     (window as any).__consentos_gtm_consent_update({ accepted });
   }
 
-  // Re-expose the floating preferences button so the visitor can
-  // withdraw or change their decision later.
-  if (t) {
-    showPreferencesButton(config, t);
-  }
 }
 
 /**
