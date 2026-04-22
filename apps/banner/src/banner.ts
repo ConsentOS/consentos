@@ -21,7 +21,7 @@ import { announce, createLiveRegion, focusFirst, onEscape, prefersReducedMotion,
 import { buildConsentState, readConsent, writeConsent } from './consent';
 import { buildGcmStateFromCategories, updateGcm } from './gcm';
 import { type TranslationStrings, DEFAULT_TRANSLATIONS, detectLocale, interpolate, loadTranslations, renderLinks } from './i18n';
-import type { BannerConfig, ButtonConfig, CategorySlug, SiteConfig } from './types';
+import type { BannerConfig, ButtonConfig, CategorySlug, ConsentState, SiteConfig } from './types';
 
 /**
  * Drive the loader's blocker proxies with a new accepted-categories
@@ -169,7 +169,7 @@ async function init(): Promise<void> {
   // Fetch site config — declared with let as A/B testing may replace it
   let config: SiteConfig;
   try {
-    const resp = await fetch(`${apiBase}/api/v1/config/sites/${siteId}`);
+    const resp = await fetch(`${apiBase}/api/v1/config/sites/${siteId}/resolved`);
     if (!resp.ok) throw new Error(`Config fetch failed: ${resp.status}`);
     config = await resp.json();
   } catch (err) {
@@ -239,6 +239,28 @@ async function init(): Promise<void> {
     // Banner isn't shown; expose the floating button straight away.
     showPreferencesButton(config, t);
     return;
+  }
+
+  // Cross-domain consent: if this site belongs to a consent group and
+  // there's no local consent, try the iframe bridge before showing
+  // the banner. The bridge reads a shared cookie on the API domain
+  // that may have been written by another site in the same group.
+  if (!existingConsent && config.consent_group_id) {
+    const bridgeOrigin = config.consent_bridge_url ?? apiBase;
+    const bridgeConsent = await tryConsentBridge(bridgeOrigin, config.consent_group_id);
+    if (bridgeConsent) {
+      // Apply the cross-domain consent as if the visitor had just
+      // accepted on this site.
+      updateAcceptedCategories(bridgeConsent.accepted as CategorySlug[]);
+      const gcmState = buildGcmStateFromCategories(bridgeConsent.accepted);
+      if (config.gcm_enabled) {
+        updateGcm(gcmState);
+      }
+      writeConsent(bridgeConsent, config.consent_expiry_days);
+      dispatchConsentEvent(bridgeConsent.accepted);
+      showPreferencesButton(config, t);
+      return;
+    }
   }
 
   // First-visit or re-consent: render the banner itself.
@@ -498,6 +520,12 @@ function handleConsent(
   // Write first-party cookie
   writeConsent(state, config.consent_expiry_days);
 
+  // Push consent to the cross-domain bridge iframe so other sites
+  // in the same group pick it up on their next load.
+  if (config.consent_group_id) {
+    storeConsentInBridge(state, config.consent_expiry_days);
+  }
+
   // Release blocked scripts for accepted categories
   updateAcceptedCategories(accepted);
 
@@ -575,6 +603,79 @@ function renderDescription(description: string, config: SiteConfig): string {
     terms: config.terms_url ?? '',
   });
   return renderLinks(rendered);
+}
+
+// -- Cross-domain consent bridge (iframe) -----------------------------------
+
+/** Reference to the bridge iframe, if one is active. */
+let _bridgeIframe: HTMLIFrameElement | null = null;
+
+/**
+ * Try to retrieve consent from the cross-domain bridge iframe.
+ *
+ * Embeds a hidden iframe on the API domain, waits for a postMessage
+ * with the shared consent state. Returns the consent state if found,
+ * or ``null`` if no cross-domain consent exists or the bridge times
+ * out (2 seconds).
+ */
+function tryConsentBridge(
+  apiBase: string,
+  groupId: string,
+): Promise<ConsentState | null> {
+  return new Promise((resolve) => {
+    const iframe = document.createElement('iframe');
+    iframe.src = `${apiBase}/consent-bridge?group=${encodeURIComponent(groupId)}`;
+    iframe.style.cssText = 'display:none;width:0;height:0;border:none;position:absolute';
+    iframe.setAttribute('aria-hidden', 'true');
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, 2000);
+
+    function onMessage(e: MessageEvent): void {
+      if (!e.data || e.data.type !== 'consentos:xd-consent') return;
+      cleanup();
+      resolve(e.data.consent ?? null);
+    }
+
+    function cleanup(): void {
+      clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+    }
+
+    window.addEventListener('message', onMessage);
+    document.body.appendChild(iframe);
+    _bridgeIframe = iframe;
+  });
+}
+
+/**
+ * Push consent state into the bridge iframe so other sites in the
+ * group pick it up on their next load.
+ */
+function storeConsentInBridge(
+  consent: ConsentState,
+  expiryDays: number,
+): void {
+  if (!_bridgeIframe?.contentWindow) return;
+  _bridgeIframe.contentWindow.postMessage(
+    { type: 'consentos:xd-store', consent, expiryDays },
+    '*',
+  );
+}
+
+/** Dispatch a consent-change custom event + dataLayer push. */
+function dispatchConsentEvent(accepted: string[]): void {
+  document.dispatchEvent(
+    new CustomEvent('consentos:consent-change', { detail: { accepted } }),
+  );
+  if (typeof window.dataLayer !== 'undefined') {
+    window.dataLayer.push({
+      event: 'consentos_consent_change',
+      cmp_accepted_categories: accepted,
+    });
+  }
 }
 
 /** Determine the consent action string. */

@@ -97,6 +97,8 @@ export interface SiteConfig {
    * every known category in that case.
    */
   enabled_categories?: CategorySlug[];
+  /** Bridge origin for cross-domain consent (e.g. ``https://cmp.consentos.dev``). */
+  consent_bridge_url?: string | null;
 }
 
 /** Maps a root initiator script to the cookie category it ultimately sets. */

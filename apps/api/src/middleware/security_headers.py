@@ -27,10 +27,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "0"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = "default-src 'none'"
+
+        # The consent bridge must be embeddable as a cross-origin iframe
+        # for cross-domain consent sharing. All other endpoints deny framing.
+        if request.url.path == "/consent-bridge":
+            response.headers["Content-Security-Policy"] = "default-src 'unsafe-inline'"
+        else:
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = "default-src 'none'"
 
         # HSTS — only on HTTPS requests (reverse proxy may terminate TLS)
         if request.url.scheme == "https":

@@ -91,6 +91,15 @@ async def get_resolved_config(
         group_defaults=group_defaults,
         region=region,
     )
+
+    # Set consent_group_id when cross-domain sharing is enabled on the
+    # group. The banner uses this as the signal to activate the iframe
+    # bridge.
+    if group_id and resolved.get("consent_sharing_enabled"):
+        resolved["consent_group_id"] = str(group_id)
+        if resolved.get("consent_bridge_url"):
+            resolved["consent_bridge_url"] = resolved["consent_bridge_url"]
+
     return build_public_config(str(site_id), resolved)
 
 

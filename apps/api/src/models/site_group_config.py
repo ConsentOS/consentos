@@ -64,5 +64,15 @@ class SiteGroupConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Consent
     consent_expiry_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Cross-domain consent sharing. When enabled, the banner embeds a
+    # hidden iframe on the bridge domain to share visitor consent state
+    # across different domains in the group.
+    consent_sharing_enabled: Mapped[bool | None] = mapped_column(nullable=True)
+
+    # The URL all sites in the group embed the bridge iframe from.
+    # Must be a single shared origin so the bridge cookie is the same
+    # across all sites (e.g. ``https://cmp.consentos.dev``).
+    consent_bridge_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     # Relationship
     site_group: Mapped["SiteGroup"] = relationship(back_populates="group_config")  # noqa: F821
