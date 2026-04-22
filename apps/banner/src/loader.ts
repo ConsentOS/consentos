@@ -40,23 +40,30 @@ declare global {
        */
       _updateBlocker?: (accepted: CategorySlug[]) => void;
     };
-    /** Public ConsentOS API for site integration. */
+    /** Public ConsentOS SDK for site integration. */
     ConsentOS: {
-      /**
-       * Identify a user by providing their third-party JWT.
-       * Syncs consent with the server-side profile.
-       * Returns categories that still need consent (empty if fully resolved).
-       */
-      identifyUser: (jwt: string) => Promise<string[]>;
-      /** Clear the identified user session (revert to anonymous). */
-      clearIdentity: () => void;
-      /**
-       * Re-open the banner so the visitor can review, change, or
-       * withdraw their consent. Pre-fills category toggles from the
-       * current stored consent state. Required by GDPR Art. 7(3)
-       * ("it shall be as easy to withdraw as to give consent").
-       */
+      /** Re-open the banner so the visitor can change their consent. */
       showPreferences: () => void;
+      /** Show the banner programmatically (first-visit or re-consent). */
+      showBanner: () => void;
+      /** Accept all categories. */
+      acceptAll: () => void;
+      /** Reject all non-essential categories. */
+      rejectAll: () => void;
+      /** Enable a single category by slug. */
+      enableCategory: (category: string) => void;
+      /** Disable a single category by slug. */
+      disableCategory: (category: string) => void;
+      /** Toggle a single category by slug. */
+      toggleCategory: (category: string) => void;
+      /** Get the current list of accepted category slugs. */
+      getAcceptedCategories: () => string[];
+      /** Check whether a specific category is currently accepted. */
+      isCategoryAccepted: (category: string) => boolean;
+      /** Identify a user by JWT for server-side consent sync. */
+      identifyUser: (jwt: string) => Promise<string[]>;
+      /** Clear the identified user session. */
+      clearIdentity: () => void;
     };
   }
 }
@@ -91,17 +98,21 @@ declare global {
 
   // Expose public CMP API — methods are stubs until the full bundle loads
   // and replaces them with real implementations.
+  const _stub = (name: string) => () => {
+    console.warn(`[ConsentOS] ${name} called before bundle loaded`);
+  };
   window.ConsentOS = {
-    identifyUser: async () => {
-      console.warn('[ConsentOS] identifyUser called before bundle loaded — queuing');
-      return [];
-    },
-    clearIdentity: () => {
-      console.warn('[ConsentOS] clearIdentity called before bundle loaded');
-    },
-    showPreferences: () => {
-      console.warn('[ConsentOS] showPreferences called before bundle loaded');
-    },
+    showPreferences: _stub('showPreferences'),
+    showBanner: _stub('showBanner'),
+    acceptAll: _stub('acceptAll'),
+    rejectAll: _stub('rejectAll'),
+    enableCategory: _stub('enableCategory'),
+    disableCategory: _stub('disableCategory'),
+    toggleCategory: _stub('toggleCategory'),
+    getAcceptedCategories: () => (readConsent()?.accepted ?? ['necessary']) as string[],
+    isCategoryAccepted: (cat: string) => ((readConsent()?.accepted ?? ['necessary']) as string[]).includes(cat),
+    identifyUser: async () => { console.warn('[ConsentOS] identifyUser called before bundle loaded'); return []; },
+    clearIdentity: _stub('clearIdentity'),
   };
 
   // Warn if essential attributes are missing
@@ -140,16 +151,12 @@ declare global {
   if (existingConsent) {
     // Consent already given — update blocker (which also sweeps any
     // cookies / storage in non-accepted categories), update GCM, and
-    // we're done. ``updateAcceptedCategories`` runs the sweep
-    // internally so historical trackers from a previously-wider
-    // consent set get cleaned up.
+    // fire the consent event. The bundle still loads below so the
+    // full SDK (showBanner, enableCategory, etc.) is available.
     updateAcceptedCategories(existingConsent.accepted as import('./types').CategorySlug[]);
     const gcmState = buildGcmStateFromCategories(existingConsent.accepted);
     updateGcm(gcmState);
-
-    // Fire consent-change event so GTM/other scripts know
     dispatchConsentEvent(existingConsent.accepted);
-    return;
   }
 
   // 4. No consent. Sweep any pre-existing classified trackers
