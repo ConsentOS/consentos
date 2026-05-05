@@ -55,15 +55,19 @@ app.conf.beat_schedule = {
         "task": "src.tasks.retention.purge_expired_consent_records",
         "schedule": crontab(hour="1", minute="0"),  # Daily at 01:00 UTC
     },
+    "telemetry-heartbeat": {
+        "task": "src.tasks.telemetry.send_heartbeat",
+        "schedule": crontab(hour="2", minute="30"),  # Daily at 02:30 UTC
+    },
 }
 
 # ── Explicit task imports ───────────────────────────────────────────
 # Must be at the bottom to avoid circular imports. These ensure the
 # worker process registers all @app.task definitions on startup.
 import src.tasks.retention  # noqa: E402
-import src.tasks.scanner  # noqa: E402, F401
+import src.tasks.scanner  # noqa: E402
+import src.tasks.telemetry  # noqa: E402, F401
 
-# EE tasks are registered conditionally — they only exist in EE mode.
 try:
     import ee.api.src.tasks.compliance_scanner
     import ee.api.src.tasks.compliance_scoring

@@ -18,6 +18,7 @@ api:
     LOG_LEVEL: INFO
     RATE_LIMIT_ENABLED: "true"
     RATE_LIMIT_PER_MINUTE: "120"
+    CONSENTOS_DEPLOYMENT: helm
   service:
     type: ClusterIP
     port: 8000
