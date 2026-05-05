@@ -1,6 +1,7 @@
 from src.models.base import Base
 from src.models.consent import ConsentRecord
 from src.models.cookie import Cookie, CookieAllowListEntry, CookieCategory, KnownCookie
+from src.models.instance import Instance
 from src.models.org_config import OrgConfig
 from src.models.organisation import Organisation
 from src.models.scan import ScanJob, ScanResult
@@ -17,6 +18,7 @@ __all__ = [
     "Cookie",
     "CookieAllowListEntry",
     "CookieCategory",
+    "Instance",
     "KnownCookie",
     "OrgConfig",
     "Organisation",

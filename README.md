@@ -166,6 +166,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, coding standards,
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md). Please do not open public issues for security reports.
 
+## Anonymous telemetry
+
+Self-hosted ConsentOS sends a single anonymous heartbeat once a day with deployment metadata and bucketed scale numbers — no consent records, no domains, no user data. It helps the project know which versions are still running and which features matter.
+
+Disable with `TELEMETRY_ENABLED=false`. See [docs/telemetry.md](docs/telemetry.md) for the full payload schema and how to audit what was sent.
+
+
 ## Licence
 
 ConsentOS is licensed under the [Elastic Licence 2.0 (ELv2)](LICENSE) — a source-available licence.

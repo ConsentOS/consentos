@@ -117,6 +117,26 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 120
 
+    # Anonymous telemetry — daily heartbeat reporting deployment metadata
+    # and bucketed scale (no PII, no consent records, no domains). Default
+    # on for production; auto-disabled in dev/test environments. Operators
+    # can opt out with ``TELEMETRY_ENABLED=false``. Full payload schema
+    # and audit instructions in ``docs/telemetry.md``.
+    telemetry_enabled: bool = True
+    telemetry_endpoint: str = "https://telemetry.consentos.dev/v1/heartbeat"
+    telemetry_timeout_seconds: int = 10
+
+    @property
+    def telemetry_active(self) -> bool:
+        """``True`` when telemetry should actually send.
+
+        Combines the explicit opt-out flag with an automatic disable in
+        dev/test environments so local runs and CI never phone home.
+        """
+        if not self.telemetry_enabled:
+            return False
+        return self.environment.lower() not in ("development", "dev", "local", "test")
+
     @model_validator(mode="after")
     def _check_production_safety(self) -> "Settings":
         """Refuse to start with unsafe defaults in non-dev environments."""

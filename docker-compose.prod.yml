@@ -44,6 +44,8 @@ services:
       dockerfile: Dockerfile
     container_name: consentos-api
     env_file: .env
+    environment:
+      CONSENTOS_DEPLOYMENT: docker-compose
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -70,6 +72,8 @@ services:
       dockerfile: Dockerfile
     container_name: consentos-worker
     env_file: .env
+    environment:
+      CONSENTOS_DEPLOYMENT: docker-compose
     working_dir: /app
     command: >
       celery -A src.celery_app worker
@@ -100,6 +104,8 @@ services:
       dockerfile: Dockerfile
     container_name: consentos-beat
     env_file: .env
+    environment:
+      CONSENTOS_DEPLOYMENT: docker-compose
     working_dir: /app
     command: >
       celery -A src.celery_app beat
