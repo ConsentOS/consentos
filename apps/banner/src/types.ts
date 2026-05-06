@@ -102,6 +102,19 @@ export interface SiteConfig {
    * DisclosedVendors segment). Empty / missing → no disclosure.
    */
   disclosed_vendor_ids?: number[];
+  /**
+   * Currently-cached IAB GVL version. Stamped onto generated TC
+   * strings via ``vendorListVersion``. ``null`` when the GVL
+   * hasn't been synced yet on the API.
+   */
+  gvl_version?: number | null;
+  /**
+   * Cookie-category slug → TCF purpose IDs the category maps to.
+   * Used to translate accepted categories into the TCF purpose
+   * bitfield when emitting TCData. Categories without an entry
+   * contribute no purposes.
+   */
+  category_tcf_purposes?: Record<string, number[]>;
   /** Bridge origin for cross-domain consent (e.g. ``https://cmp.consentos.dev``). */
   consent_bridge_url?: string | null;
 }

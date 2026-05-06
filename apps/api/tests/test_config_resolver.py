@@ -377,3 +377,32 @@ class TestDisclosedVendorIds:
 
     def test_normalise_dedupes_and_sorts(self):
         assert _normalise_disclosed_vendor_ids([5, 1, 5, 3, 1, 5]) == [1, 3, 5]
+
+
+class TestGvlVersionAndPurposes:
+    """Public config exposes the new TCF v2.3 plumbing fields."""
+
+    def test_gvl_version_defaults_to_none(self):
+        public = build_public_config("site-xyz", resolve_config({}))
+        assert public["gvl_version"] is None
+
+    def test_gvl_version_passed_through(self):
+        public = build_public_config(
+            "site-xyz",
+            resolve_config({}),
+            gvl_version=157,
+        )
+        assert public["gvl_version"] == 157
+
+    def test_category_tcf_purposes_defaults_to_empty(self):
+        public = build_public_config("site-xyz", resolve_config({}))
+        assert public["category_tcf_purposes"] == {}
+
+    def test_category_tcf_purposes_passed_through(self):
+        mapping = {"analytics": [7, 8], "marketing": [4, 11]}
+        public = build_public_config(
+            "site-xyz",
+            resolve_config({}),
+            category_tcf_purposes=mapping,
+        )
+        assert public["category_tcf_purposes"] == mapping

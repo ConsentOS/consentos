@@ -18,9 +18,16 @@ import { announce, createLiveRegion, focusFirst, onEscape, prefersReducedMotion,
 // The loader exposes ``_updateBlocker`` on ``window.__consentos``
 // for us to drive its proxies — see ``updateAcceptedCategories``
 // below and ``apps/banner/src/loader.ts``.
-import { buildConsentState, readConsent, writeConsent } from './consent';
+import { buildConsentState, readConsent, writeConsent, writeTcfCookie } from './consent';
 import { buildGcmStateFromCategories, updateGcm } from './gcm';
 import { type TranslationStrings, DEFAULT_TRANSLATIONS, detectLocale, interpolate, loadTranslations, renderLinks } from './i18n';
+import {
+  createTCModel,
+  installTcfApi,
+  setTcfDisplayStatus,
+  updateTcfConsent,
+} from './tcf';
+import type { TCModel } from './tcf';
 import type { BannerConfig, ButtonConfig, CategorySlug, ConsentState, SiteConfig } from './types';
 
 /**
@@ -158,6 +165,51 @@ function nonEssentialFor(enabled: CategorySlug[]): CategorySlug[] {
   return enabled.filter((slug) => slug !== 'necessary');
 }
 
+/**
+ * Translate accepted cookie categories into a TCF purpose-ID set.
+ * Categories without a mapping in ``config.category_tcf_purposes``
+ * contribute no purposes (e.g. ``necessary`` is typically untracked
+ * by IAB or maps to purpose 1, depending on operator config).
+ */
+function purposesForAccepted(
+  accepted: CategorySlug[],
+  mapping: Record<string, number[]> | undefined,
+): Set<number> {
+  const purposes = new Set<number>();
+  if (!mapping) return purposes;
+  for (const slug of accepted) {
+    const ids = mapping[slug];
+    if (Array.isArray(ids)) {
+      for (const id of ids) purposes.add(id);
+    }
+  }
+  return purposes;
+}
+
+/** ConsentOS isn't yet on the IAB CMP List — placeholder until CMP-69 lands. */
+const PLACEHOLDER_CMP_ID = 0;
+const CMP_VERSION = 1;
+
+/**
+ * Build a TCModel for emission. Captures the current consent decision
+ * plus the operator-configured disclosed-vendor list.
+ */
+function buildTCModel(
+  config: SiteConfig,
+  accepted: CategorySlug[],
+  publisherCC: string,
+): TCModel {
+  const purposes = purposesForAccepted(accepted, config.category_tcf_purposes);
+  return createTCModel({
+    cmpId: PLACEHOLDER_CMP_ID,
+    cmpVersion: CMP_VERSION,
+    publisherCC,
+    vendorListVersion: config.gvl_version ?? 0,
+    purposeConsents: purposes,
+    disclosedVendors: new Set(config.disclosed_vendor_ids ?? []),
+  });
+}
+
 /** Initialise the banner. Called when the bundle loads. */
 async function init(): Promise<void> {
   const { siteId, apiBase, cdnBase } = window.__consentos;
@@ -209,6 +261,14 @@ async function init(): Promise<void> {
   if (config.gpp_enabled) {
     _hooks.installGppApi(0, config.gpp_supported_apis ?? []);
     _hooks.setGppDisplayStatus('visible');
+  }
+
+  // Install __tcfapi (locator iframe + postMessage proxy + global)
+  // when the site uses TCF. Vendors in iframes look for this on load
+  // — installing early so the API is reachable even before the user
+  // takes a consent action.
+  if (config.tcf_enabled) {
+    installTcfApi(PLACEHOLDER_CMP_ID, CMP_VERSION);
   }
 
   // Evaluate GPC signal
@@ -378,6 +438,12 @@ function renderBanner(
   abAssignment?: ABAssignment | null,
   openOptions?: OpenOptions,
 ): void {
+  // Signal to TCF-aware vendors that the CMP UI is now visible. They
+  // can poll ``ping`` for ``displayStatus`` to know when to retry
+  // ``getTCData`` after the user has interacted.
+  if (config.tcf_enabled) {
+    setTcfDisplayStatus('visible');
+  }
   const host = document.createElement('div');
   host.id = 'consentos-banner-host';
   const shadow = host.attachShadow({ mode: 'open' });
@@ -547,11 +613,20 @@ function handleConsent(
     _hooks.setGppDisplayStatus('hidden');
   }
 
+  // Generate TCF v2.3 TC string + emit ``useractioncomplete`` event
+  // to any registered ``__tcfapi`` listeners. The publisher CC is
+  // operator-configurable; ``GB`` matches the createTCModel default.
+  let tcString: string | undefined;
+  if (config.tcf_enabled) {
+    const tcModel = buildTCModel(config, accepted, 'GB');
+    tcString = updateTcfConsent(tcModel);
+  }
+
   const state = buildConsentState(
     accepted,
     rejected,
     existing?.visitorId,
-    undefined,
+    tcString,
     gcmState,
     config.id,
     gppString,
@@ -559,8 +634,13 @@ function handleConsent(
     gpcResult?.honoured,
   );
 
-  // Write first-party cookie
+  // Write first-party cookie + the IAB-standard euconsent-v2 cookie
+  // when TCF is enabled (vendors that don't use postMessage read it
+  // directly from document.cookie).
   writeConsent(state, config.consent_expiry_days);
+  if (tcString) {
+    writeTcfCookie(tcString, config.consent_expiry_days);
+  }
 
   // Push consent to the cross-domain bridge iframe so other sites
   // in the same group pick it up on their next load.

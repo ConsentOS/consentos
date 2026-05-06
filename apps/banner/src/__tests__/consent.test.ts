@@ -7,6 +7,7 @@ import {
   isCategoryAccepted,
   readConsent,
   writeConsent,
+  writeTcfCookie,
 } from '../consent';
 
 describe('consent', () => {
@@ -99,6 +100,26 @@ describe('consent', () => {
       expect(isCategoryAccepted('necessary')).toBe(true);
       expect(isCategoryAccepted('analytics')).toBe(true);
       expect(isCategoryAccepted('marketing')).toBe(false);
+    });
+  });
+
+  describe('writeTcfCookie', () => {
+    it('writes the euconsent-v2 cookie with the TC string', () => {
+      writeTcfCookie('CPXxRAAAA.YAAA');
+      expect(document.cookie).toContain('euconsent-v2=CPXxRAAAA.YAAA');
+    });
+
+    it('is a no-op when the TC string is empty', () => {
+      writeTcfCookie('');
+      expect(document.cookie).not.toContain('euconsent-v2=');
+    });
+
+    it('clearConsent removes both ConsentOS and TCF cookies', () => {
+      writeConsent(buildConsentState(['necessary'], []));
+      writeTcfCookie('CPXxRAAAA');
+      clearConsent();
+      expect(document.cookie).not.toContain('_consentos_consent=eyJ');
+      expect(document.cookie).not.toContain('euconsent-v2=CPXxRAAAA');
     });
   });
 });
