@@ -31,6 +31,7 @@ class SiteGroupConfigUpdate(BaseModel):
     scan_max_pages: int | None = Field(default=None, ge=1, le=1000)
     consent_expiry_days: int | None = Field(default=None, ge=1, le=730)
     enabled_categories: list[str] | None = None
+    disclosed_vendor_ids: list[int] | None = None
     consent_sharing_enabled: bool | None = None
     consent_bridge_url: str | None = Field(
         default=None,
@@ -61,6 +62,7 @@ class SiteGroupConfigResponse(BaseModel):
     scan_max_pages: int | None
     consent_expiry_days: int | None
     enabled_categories: list[str] | None = None
+    disclosed_vendor_ids: list[int] | None = None
     consent_sharing_enabled: bool | None = None
     consent_bridge_url: str | None = None
     created_at: datetime

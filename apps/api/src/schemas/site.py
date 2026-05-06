@@ -69,6 +69,9 @@ class SiteConfigCreate(BaseModel):
     # explicit list overrides; the resolver re-adds ``necessary``
     # if omitted and drops any unknown slugs.
     enabled_categories: list[str] | None = None
+    # IAB vendor IDs disclosed to users in the CMP UI (TCF v2.3
+    # DisclosedVendors segment). ``None`` inherits from the cascade.
+    disclosed_vendor_ids: list[int] | None = None
 
 
 class SiteConfigUpdate(BaseModel):
@@ -92,6 +95,7 @@ class SiteConfigUpdate(BaseModel):
     consent_expiry_days: int | None = Field(default=None, ge=1, le=730)
     consent_retention_days: int | None = Field(default=None, ge=1, le=730)
     enabled_categories: list[str] | None = None
+    disclosed_vendor_ids: list[int] | None = None
 
 
 class SiteConfigResponse(BaseModel):
@@ -117,6 +121,7 @@ class SiteConfigResponse(BaseModel):
     consent_expiry_days: int = 365
     consent_retention_days: int | None = None
     enabled_categories: list[str] | None = None
+    disclosed_vendor_ids: list[int] | None = None
     created_at: datetime
     updated_at: datetime
 

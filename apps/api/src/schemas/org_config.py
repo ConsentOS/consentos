@@ -32,6 +32,7 @@ class OrgConfigUpdate(BaseModel):
     consent_expiry_days: int | None = Field(default=None, ge=1, le=730)
     consent_retention_days: int | None = Field(default=None, ge=1, le=730)
     enabled_categories: list[str] | None = None
+    disclosed_vendor_ids: list[int] | None = None
 
 
 class OrgConfigResponse(BaseModel):
@@ -57,6 +58,7 @@ class OrgConfigResponse(BaseModel):
     consent_expiry_days: int | None
     consent_retention_days: int | None
     enabled_categories: list[str] | None = None
+    disclosed_vendor_ids: list[int] | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -97,6 +97,11 @@ export interface SiteConfig {
    * every known category in that case.
    */
   enabled_categories?: CategorySlug[];
+  /**
+   * IAB vendor IDs disclosed to users in the CMP UI (TCF v2.3
+   * DisclosedVendors segment). Empty / missing → no disclosure.
+   */
+  disclosed_vendor_ids?: number[];
   /** Bridge origin for cross-domain consent (e.g. ``https://cmp.consentos.dev``). */
   consent_bridge_url?: string | null;
 }
