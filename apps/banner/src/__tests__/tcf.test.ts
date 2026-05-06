@@ -951,6 +951,178 @@ describe('TCF v2.3 — DisclosedVendors segment', () => {
   });
 });
 
+// ── Cross-frame __tcfapi (locator iframe + postMessage) ─────────────
+
+describe('TCF cross-frame — __tcfapiLocator iframe', () => {
+  beforeEach(() => {
+    removeTcfApi();
+    document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    removeTcfApi();
+    document.body.innerHTML = '';
+  });
+
+  it('creates a hidden iframe named __tcfapiLocator on install', () => {
+    installTcfApi(42, 1);
+    const frame = document.querySelector(
+      'iframe[name="__tcfapiLocator"]'
+    ) as HTMLIFrameElement | null;
+    expect(frame).not.toBeNull();
+    expect(frame!.style.display).toBe('none');
+    expect(frame!.tabIndex).toBe(-1);
+  });
+
+  it('does not create a duplicate locator on repeat install', () => {
+    installTcfApi(42, 1);
+    installTcfApi(42, 1);
+    const frames = document.querySelectorAll('iframe[name="__tcfapiLocator"]');
+    expect(frames.length).toBe(1);
+  });
+
+  it('removes the locator iframe on removeTcfApi', () => {
+    installTcfApi(42, 1);
+    expect(document.querySelector('iframe[name="__tcfapiLocator"]')).not.toBeNull();
+    removeTcfApi();
+    expect(document.querySelector('iframe[name="__tcfapiLocator"]')).toBeNull();
+  });
+});
+
+describe('TCF cross-frame — postMessage proxy', () => {
+  beforeEach(() => {
+    removeTcfApi();
+    document.body.innerHTML = '';
+  });
+
+  afterEach(() => {
+    removeTcfApi();
+    document.body.innerHTML = '';
+  });
+
+  /**
+   * Drive the message listener directly: jsdom doesn't process real
+   * cross-frame messages, but the listener accepts MessageEvent-shaped
+   * objects so we can synthesise one and assert the round-trip.
+   */
+  function dispatchCall(payload: unknown, source: { postMessage: ReturnType<typeof vi.fn> }) {
+    const event = new MessageEvent('message', {
+      data: payload,
+      origin: 'https://vendor.example',
+      source: source as unknown as MessageEventSource,
+    });
+    window.dispatchEvent(event);
+  }
+
+  it('responds to a ping envelope on the source window', () => {
+    installTcfApi(42, 3);
+    const source = { postMessage: vi.fn() };
+    dispatchCall(
+      { __tcfapiCall: { command: 'ping', version: 2, callId: 'abc-1' } },
+      source
+    );
+
+    expect(source.postMessage).toHaveBeenCalledTimes(1);
+    const [reply, target] = source.postMessage.mock.calls[0];
+    expect(target).toBe('https://vendor.example');
+    expect(reply.__tcfapiReturn.callId).toBe('abc-1');
+    expect(reply.__tcfapiReturn.success).toBe(true);
+    expect(reply.__tcfapiReturn.returnValue.cmpId).toBe(42);
+    expect(reply.__tcfapiReturn.returnValue.apiVersion).toBe('2.3');
+  });
+
+  it('round-trips JSON string envelopes (caller used JSON.stringify)', () => {
+    installTcfApi(42, 1);
+    const source = { postMessage: vi.fn() };
+    dispatchCall(
+      JSON.stringify({
+        __tcfapiCall: { command: 'ping', version: 2, callId: 99 },
+      }),
+      source
+    );
+
+    expect(source.postMessage).toHaveBeenCalledTimes(1);
+    const [reply] = source.postMessage.mock.calls[0];
+    expect(typeof reply).toBe('string');
+    const parsed = JSON.parse(reply as string);
+    expect(parsed.__tcfapiReturn.callId).toBe(99);
+    expect(parsed.__tcfapiReturn.success).toBe(true);
+  });
+
+  it('falls back to "*" targetOrigin when source reports null origin', () => {
+    installTcfApi(42, 1);
+    const source = { postMessage: vi.fn() };
+    const event = new MessageEvent('message', {
+      data: { __tcfapiCall: { command: 'ping', version: 2, callId: 1 } },
+      origin: 'null',
+      source: source as unknown as MessageEventSource,
+    });
+    window.dispatchEvent(event);
+
+    expect(source.postMessage).toHaveBeenCalledTimes(1);
+    expect(source.postMessage.mock.calls[0][1]).toBe('*');
+  });
+
+  it('ignores messages without an __tcfapiCall envelope', () => {
+    installTcfApi(42, 1);
+    const source = { postMessage: vi.fn() };
+    dispatchCall({ unrelated: 'message' }, source);
+    dispatchCall('just a string', source);
+    dispatchCall(null, source);
+    expect(source.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('rejects callers using a wrong API version', () => {
+    installTcfApi(42, 1);
+    const source = { postMessage: vi.fn() };
+    dispatchCall(
+      { __tcfapiCall: { command: 'ping', version: 1, callId: 7 } },
+      source
+    );
+
+    const [reply] = source.postMessage.mock.calls[0];
+    expect(reply.__tcfapiReturn.success).toBe(false);
+    expect(reply.__tcfapiReturn.returnValue).toBe(false);
+  });
+
+  it('proxies getTCData over postMessage', () => {
+    installTcfApi(42, 1);
+    updateTcfConsent(
+      createTCModel({
+        cmpId: 42,
+        purposeConsents: new Set([1, 3]),
+        disclosedVendors: new Set([5]),
+      })
+    );
+
+    const source = { postMessage: vi.fn() };
+    dispatchCall(
+      { __tcfapiCall: { command: 'getTCData', version: 2, callId: 'g-1' } },
+      source
+    );
+
+    const [reply] = source.postMessage.mock.calls[0];
+    expect(reply.__tcfapiReturn.success).toBe(true);
+    const tcData = reply.__tcfapiReturn.returnValue;
+    expect(tcData.cmpId).toBe(42);
+    expect(tcData.purpose.consents['1']).toBe(true);
+    expect(tcData.purpose.consents['2']).toBe(false);
+    expect(tcData.disclosedVendors['5']).toBe(true);
+  });
+
+  it('removes the message listener on removeTcfApi', () => {
+    installTcfApi(42, 1);
+    removeTcfApi();
+
+    const source = { postMessage: vi.fn() };
+    dispatchCall(
+      { __tcfapiCall: { command: 'ping', version: 2, callId: 1 } },
+      source
+    );
+    expect(source.postMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe('TCF v2.3 — TCData', () => {
   beforeEach(() => {
     delete window.__tcfapi;
