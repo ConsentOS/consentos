@@ -13,7 +13,7 @@ stable across versions so we treat them as the natural primary key.
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -112,7 +112,9 @@ class IabVendor(TimestampMixin, Base):
     uses_cookies: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     cookie_refresh: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     uses_non_cookie_access: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    cookie_max_age_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # BigInteger — real GVL data has vendors with values exceeding 2^31
+    # (effectively "forever" cookies), e.g. 63072000000.
+    cookie_max_age_seconds: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     data_retention: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     urls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
     data_declaration: Mapped[list[int] | None] = mapped_column(JSONB, nullable=True)
