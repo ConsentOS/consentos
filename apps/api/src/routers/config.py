@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.extensions.registry import get_registry
+from src.models.cookie import CookieCategory
+from src.models.iab_gvl import IabGvlMeta
 from src.models.org_config import OrgConfig
 from src.models.site import Site
 from src.models.site_config import SiteConfig
@@ -100,7 +102,14 @@ async def get_resolved_config(
         if resolved.get("consent_bridge_url"):
             resolved["consent_bridge_url"] = resolved["consent_bridge_url"]
 
-    return build_public_config(str(site_id), resolved)
+    gvl_version = await _load_gvl_version(db)
+    category_tcf_purposes = await _load_category_tcf_purposes(db)
+    return build_public_config(
+        str(site_id),
+        resolved,
+        gvl_version=gvl_version,
+        category_tcf_purposes=category_tcf_purposes,
+    )
 
 
 @router.get("/sites/{site_id}/geo-resolved")
@@ -146,7 +155,14 @@ async def get_geo_resolved_config(
         group_defaults=group_defaults,
         region=geo.region,
     )
-    public = build_public_config(str(site_id), resolved)
+    gvl_version = await _load_gvl_version(db)
+    category_tcf_purposes = await _load_category_tcf_purposes(db)
+    public = build_public_config(
+        str(site_id),
+        resolved,
+        gvl_version=gvl_version,
+        category_tcf_purposes=category_tcf_purposes,
+    )
 
     # Include detected geo info so the banner can use it
     public["detected_country"] = geo.country_code
@@ -331,3 +347,28 @@ async def _load_group_defaults(group_id: uuid.UUID, db: AsyncSession) -> dict | 
     if group_config is None:
         return None
     return orm_to_config_dict(group_config)
+
+
+async def _load_gvl_version(db: AsyncSession) -> int | None:
+    """Return the currently-cached IAB GVL version, or ``None`` if unsynced.
+
+    Surfaced into the public config so the banner can stamp it onto
+    generated TC strings (``vendorListVersion`` field).
+    """
+    result = await db.execute(select(IabGvlMeta.vendor_list_version).limit(1))
+    return result.scalar_one_or_none()
+
+
+async def _load_category_tcf_purposes(db: AsyncSession) -> dict[str, list[int]]:
+    """Return the cookie-category slug → TCF purpose IDs mapping.
+
+    The banner uses this to translate accepted cookie categories into
+    TCF purpose IDs when building TCData. Categories without a mapping
+    are omitted from the result.
+    """
+    result = await db.execute(
+        select(CookieCategory.slug, CookieCategory.tcf_purpose_ids).where(
+            CookieCategory.tcf_purpose_ids.isnot(None)
+        )
+    )
+    return {slug: ids for slug, ids in result.all() if ids}

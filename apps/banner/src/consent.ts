@@ -1,6 +1,13 @@
 import type { CategorySlug, ConsentState } from './types';
 
 const COOKIE_NAME = '_consentos_consent';
+/**
+ * IAB-standard TCF v2 consent cookie name. Vendors that participate
+ * in the Transparency & Consent Framework read this cookie directly
+ * (in addition to the ``__tcfapi`` postMessage path) so we mirror
+ * the encoded TC string into it whenever TCF is enabled on the site.
+ */
+const TCF_COOKIE_NAME = 'euconsent-v2';
 const BANNER_VERSION = '0.1.0';
 
 /** Generate a simple visitor ID (UUID v4-like). */
@@ -76,6 +83,19 @@ export function clearConsent(): void {
   if (typeof document === 'undefined') return;
   const secure = location.protocol === 'https:' ? '; Secure' : '';
   document.cookie = `${COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax${secure}`;
+  document.cookie = `${TCF_COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax${secure}`;
+}
+
+/**
+ * Write the TCF v2 ``euconsent-v2`` cookie containing the encoded
+ * TC string. Vendors that participate in TCF read this directly.
+ * No-op when ``tcString`` is empty.
+ */
+export function writeTcfCookie(tcString: string, expiryDays: number = 365): void {
+  if (typeof document === 'undefined' || !tcString) return;
+  const expires = new Date(Date.now() + expiryDays * 86400000).toUTCString();
+  const secure = location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${TCF_COOKIE_NAME}=${tcString}; path=/; expires=${expires}; SameSite=Lax${secure}`;
 }
 
 /** Check whether consent has been given (any state exists). */

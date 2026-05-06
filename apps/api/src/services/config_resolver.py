@@ -132,10 +132,24 @@ def _normalise_enabled_categories(value: Any) -> list[str]:
 def build_public_config(
     site_id: str,
     resolved: dict[str, Any],
+    *,
+    gvl_version: int | None = None,
+    category_tcf_purposes: dict[str, list[int]] | None = None,
 ) -> dict[str, Any]:
     """Build a public configuration JSON for the banner script.
 
     Strips internal fields and adds the site_id for identification.
+
+    Args:
+        site_id: ID of the site (echoed into the payload for the banner).
+        resolved: Output of ``resolve_config``.
+        gvl_version: Current IAB GVL version from ``iab_gvl_meta``.
+            Surfaced so the banner can stamp it onto generated TC strings;
+            ``None`` when the GVL hasn't been synced yet.
+        category_tcf_purposes: Cookie-category slug → list of TCF purpose
+            IDs. The banner translates accepted categories into TCF
+            purposes when building TCData. Empty when TCF mapping isn't
+            populated on the cookie_categories rows.
     """
     return {
         "id": resolved.get("id", ""),
@@ -163,6 +177,8 @@ def build_public_config(
         "disclosed_vendor_ids": _normalise_disclosed_vendor_ids(
             resolved.get("disclosed_vendor_ids")
         ),
+        "gvl_version": gvl_version,
+        "category_tcf_purposes": category_tcf_purposes or {},
         "consent_bridge_url": resolved.get("consent_bridge_url"),
     }
 
