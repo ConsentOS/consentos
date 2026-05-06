@@ -1,11 +1,22 @@
 /**
- * IAB TCF v2.2 — TC string encoder/decoder and __tcfapi interface.
+ * IAB TCF v2.3 — TC string encoder/decoder and __tcfapi interface.
  *
- * Implements the Transparency & Consent Framework v2.2 specification:
- * - Encode/decode TC strings (base64url-encoded bitfields)
- * - Standard __tcfapi interface (getTCData, ping, addEventListener, removeEventListener)
+ * Implements the Transparency & Consent Framework v2.3 specification:
+ * - Encode 3-segment TC strings (Core + DisclosedVendors). The
+ *   DisclosedVendors segment became mandatory for any TC string created
+ *   on or after 1 March 2026 per the IAB Europe v2.3 transition.
+ * - Decode is read-compatible with legacy single-segment v2.2 strings;
+ *   missing DisclosedVendors yields an empty disclosure set.
+ * - Standard __tcfapi interface (getTCData, ping, addEventListener,
+ *   removeEventListener) with the v2.3 ``disclosedVendors`` field on
+ *   TCData and ``apiVersion: '2.3'`` on ping.
+ *
+ * Note on tcfPolicyVersion: remains 4 in v2.3. The IAB Tech Lab spec
+ * change (PR #404) is structural — a new mandatory segment plus an
+ * additive TCData field — not a policy version bump.
  *
  * @see https://github.com/InteractiveAdvertisingBureau/GDPR-Transparency-and-Consent-Framework
+ * @see https://iabeurope.eu/all-you-need-to-know-about-the-transition-to-tcf-v2-3/
  */
 
 declare global {
@@ -40,7 +51,7 @@ export interface TCModel {
   consentLanguage: string;
   /** Version of the GVL used to create this TC string. */
   vendorListVersion: number;
-  /** TCF policy version — 4 for TCF v2.2. */
+  /** TCF policy version — 4 (unchanged in v2.3; structural changes only). */
   tcfPolicyVersion: number;
   /** Whether this TC string is specific to this service. */
   isServiceSpecific: boolean;
@@ -62,6 +73,11 @@ export interface TCModel {
   vendorLegitimateInterests: Set<number>;
   /** Publisher restrictions by purpose. */
   publisherRestrictions: PublisherRestriction[];
+  /**
+   * Vendor IDs disclosed to the user in the CMP UI (TCF v2.3).
+   * Mandatory in TC strings created on or after 1 March 2026.
+   */
+  disclosedVendors: Set<number>;
 }
 
 /** A publisher restriction entry. */
@@ -104,6 +120,8 @@ export interface TCData {
     legitimateInterests: Record<string, boolean>;
   };
   specialFeatureOptins: Record<string, boolean>;
+  /** Vendor IDs disclosed in the CMP UI (TCF v2.3+). */
+  disclosedVendors: Record<string, boolean>;
 }
 
 /** Return type for the __tcfapi ping command. */
@@ -317,12 +335,43 @@ export function createTCModel(overrides?: Partial<TCModel>): TCModel {
     vendorConsents: new Set(),
     vendorLegitimateInterests: new Set(),
     publisherRestrictions: [],
+    disclosedVendors: new Set(),
     ...overrides,
   };
 }
 
-/** Encode a TCModel into a TC string (core segment only). */
+// ── TCF v2.3 segment types ───────────────────────────────────────────
+
+/**
+ * Non-core TC string segments. Each non-core segment is prefixed by a
+ * 3-bit SegmentType field per the IAB Tech Lab "Consent string and
+ * vendor list formats v2" spec.
+ */
+export enum SegmentType {
+  /** DisclosedVendors — required in TCF v2.3. */
+  DisclosedVendors = 1,
+  /** AllowedVendors — service-specific OOB; not currently emitted. */
+  AllowedVendors = 2,
+  /** Publisher TC — optional publisher purpose data. */
+  PublisherTC = 3,
+}
+
+/**
+ * Encode a TCModel into a TCF v2.3 TC string.
+ *
+ * Output format: ``<core>.<disclosedVendors>`` — both segments are
+ * mandatory under TCF v2.3 for any string created on or after
+ * 1 March 2026. The DisclosedVendors segment is allowed to be empty
+ * (``maxVendorId = 0``) but the segment itself must be present.
+ */
 export function encodeTCString(model: TCModel): string {
+  const core = encodeCoreSegment(model);
+  const disclosed = encodeDisclosedVendorsSegment(model.disclosedVendors);
+  return `${core}.${disclosed}`;
+}
+
+/** Encode just the Core segment (without segment type prefix). */
+function encodeCoreSegment(model: TCModel): string {
   const writer = new BitWriter();
 
   // Core segment
@@ -381,10 +430,66 @@ export function encodeTCString(model: TCModel): string {
   return bytesToBase64url(writer.toBytes());
 }
 
-/** Decode a TC string (core segment) back into a TCModel. */
+/**
+ * Encode a DisclosedVendors segment (TCF v2.3).
+ *
+ * Layout: ``SegmentType (3 bits) | MaxVendorId (16 bits) | [IsRange + entries]``.
+ * Uses bitfield encoding (range encoding is permitted by spec but
+ * bitfield is what the rest of the encoder uses for vendor sections).
+ */
+export function encodeDisclosedVendorsSegment(disclosedVendors: Set<number>): string {
+  const writer = new BitWriter();
+  writer.writeInt(SegmentType.DisclosedVendors, 3);
+  const max = maxId(disclosedVendors);
+  writer.writeInt(max, 16);
+  if (max > 0) {
+    writer.writeBool(false); // IsRangeEncoding = false (bitfield)
+    writer.writeBitfield(disclosedVendors, max);
+  }
+  return bytesToBase64url(writer.toBytes());
+}
+
+/**
+ * Decode a single non-core segment.
+ *
+ * Returns the parsed disclosed vendors when the segment is a
+ * DisclosedVendors segment; returns ``null`` for any other segment
+ * type (AllowedVendors, PublisherTC) which we currently ignore.
+ */
+function decodeSegment(segment: string): { disclosedVendors: Set<number> } | null {
+  if (segment.length === 0) return null;
+  const bytes = base64urlToBytes(segment);
+  if (bytes.length === 0) return null;
+
+  const reader = new BitReader(bytes);
+  const segmentType = reader.readInt(3);
+
+  if (segmentType !== SegmentType.DisclosedVendors) {
+    // Skip AllowedVendors (2) and PublisherTC (3) — not currently consumed.
+    return null;
+  }
+
+  const max = reader.readInt(16);
+  if (max === 0) return { disclosedVendors: new Set() };
+
+  const isRange = reader.readBool();
+  if (isRange) {
+    return { disclosedVendors: readRangeEntries(reader) };
+  }
+  return { disclosedVendors: reader.readBitfield(max) };
+}
+
+/**
+ * Decode a TC string back into a TCModel.
+ *
+ * Read-compatible with both legacy v2.2 (single Core segment) and
+ * v2.3 (Core + DisclosedVendors) strings. Cached strings created
+ * before the v2.3 deadline remain valid per the IAB Europe transition
+ * note and decode to a model with empty ``disclosedVendors``.
+ */
 export function decodeTCString(tcString: string): TCModel {
-  // Only parse the core segment (first dot-separated part)
-  const coreSegment = tcString.split('.')[0];
+  const segments = tcString.split('.');
+  const coreSegment = segments[0];
   const bytes = base64urlToBytes(coreSegment);
   const reader = new BitReader(bytes);
 
@@ -452,6 +557,17 @@ export function decodeTCString(tcString: string): TCModel {
     }
   }
 
+  // Parse any non-core segments (DisclosedVendors / AllowedVendors /
+  // PublisherTC). Legacy v2.2 strings have only one segment so this
+  // loop is a no-op for them and ``disclosedVendors`` stays empty.
+  let disclosedVendors = new Set<number>();
+  for (let i = 1; i < segments.length; i++) {
+    const parsed = decodeSegment(segments[i]);
+    if (parsed?.disclosedVendors) {
+      disclosedVendors = parsed.disclosedVendors;
+    }
+  }
+
   return {
     version,
     created,
@@ -472,6 +588,7 @@ export function decodeTCString(tcString: string): TCModel {
     vendorConsents,
     vendorLegitimateInterests,
     publisherRestrictions,
+    disclosedVendors,
   };
 }
 
@@ -549,6 +666,7 @@ function buildTCData(
   const vendorConsents: Record<string, boolean> = {};
   const vendorLI: Record<string, boolean> = {};
   const specialFeatures: Record<string, boolean> = {};
+  const disclosedVendors: Record<string, boolean> = {};
 
   if (model) {
     for (let i = 1; i <= NUM_PURPOSES; i++) {
@@ -557,10 +675,14 @@ function buildTCData(
     }
     const maxVC = maxId(model.vendorConsents);
     const maxVLI = maxId(model.vendorLegitimateInterests);
+    const maxDV = maxId(model.disclosedVendors);
     const vendorMax = Math.max(maxVC, maxVLI);
     for (let i = 1; i <= vendorMax; i++) {
       vendorConsents[String(i)] = model.vendorConsents.has(i);
       vendorLI[String(i)] = model.vendorLegitimateInterests.has(i);
+    }
+    for (let i = 1; i <= maxDV; i++) {
+      disclosedVendors[String(i)] = model.disclosedVendors.has(i);
     }
     for (let i = 1; i <= NUM_SPECIAL_FEATURES; i++) {
       specialFeatures[String(i)] = model.specialFeatureOptIns.has(i);
@@ -589,6 +711,7 @@ function buildTCData(
       legitimateInterests: vendorLI,
     },
     specialFeatureOptins: specialFeatures,
+    disclosedVendors,
   };
 }
 
@@ -616,7 +739,7 @@ function tcfApiHandler(
         cmpLoaded: true,
         cmpStatus: 'loaded',
         displayStatus: apiState.displayStatus,
-        apiVersion: '2.2',
+        apiVersion: '2.3',
         cmpVersion: apiState.cmpVersion,
         cmpId: apiState.cmpId,
         gvlVersion: apiState.tcModel?.vendorListVersion ?? 0,
