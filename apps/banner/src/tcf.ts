@@ -780,6 +780,140 @@ function tcfApiHandler(
   }
 }
 
+// ── Cross-frame __tcfapi (postMessage proxy + locator iframe) ────────
+
+/** Active message listener — kept so we can remove it on tear-down. */
+let messageListener: ((event: MessageEvent) => void) | null = null;
+/** The hidden ``__tcfapiLocator`` iframe vendors detect via frame walking. */
+let locatorFrame: HTMLIFrameElement | null = null;
+
+/** Cross-frame message envelope sent by vendor iframes to call __tcfapi. */
+interface TcfApiCall {
+  command: string;
+  parameter?: unknown;
+  version: number;
+  callId: unknown;
+}
+
+/**
+ * Create the ``__tcfapiLocator`` iframe.
+ *
+ * Vendors running inside iframes walk up the parent chain looking for a
+ * window that has a child iframe named ``__tcfapiLocator``. That window
+ * is the one running the CMP, and they then ``postMessage`` to it with
+ * an ``__tcfapiCall`` envelope. Without this iframe vendors can't find
+ * the CMP from inside an ad iframe.
+ */
+function installLocatorFrame(): void {
+  if (typeof document === 'undefined') return;
+  if (document.querySelector('iframe[name="__tcfapiLocator"]')) return;
+
+  const frame = document.createElement('iframe');
+  frame.name = '__tcfapiLocator';
+  frame.style.cssText =
+    'display:none;position:absolute;top:0;left:0;border:0;width:1px;height:1px';
+  frame.setAttribute('aria-hidden', 'true');
+  frame.tabIndex = -1;
+
+  if (document.body) {
+    document.body.appendChild(frame);
+  } else {
+    // Mount once the body exists; head-time installs (loader) need this.
+    document.addEventListener(
+      'DOMContentLoaded',
+      () => {
+        if (
+          document.body &&
+          !document.querySelector('iframe[name="__tcfapiLocator"]')
+        ) {
+          document.body.appendChild(frame);
+        }
+      },
+      { once: true }
+    );
+  }
+
+  locatorFrame = frame;
+}
+
+/** Remove the locator iframe (idempotent). */
+function removeLocatorFrame(): void {
+  if (locatorFrame && locatorFrame.parentNode) {
+    locatorFrame.parentNode.removeChild(locatorFrame);
+  }
+  locatorFrame = null;
+}
+
+/** Pull a TcfApiCall envelope out of a postMessage payload, if present. */
+function extractCall(data: unknown): TcfApiCall | undefined {
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      return parsed?.__tcfapiCall;
+    } catch {
+      return undefined;
+    }
+  }
+  if (data && typeof data === 'object') {
+    return (data as { __tcfapiCall?: TcfApiCall }).__tcfapiCall;
+  }
+  return undefined;
+}
+
+/**
+ * Install the ``message`` listener that proxies cross-frame __tcfapi
+ * calls.
+ *
+ * Wire: vendor iframe ``postMessage({ __tcfapiCall: {...} })`` →
+ * our listener → ``tcfApiHandler`` → ``postMessage({ __tcfapiReturn: {...} })``
+ * back to the original sender. The wire format mirrors whatever the
+ * caller sent (string vs object) so callers using ``JSON.stringify``
+ * and callers passing raw objects both work.
+ */
+function installPostMessageHandler(): void {
+  if (typeof window === 'undefined') return;
+  // Idempotent — repeat installs would otherwise leak a stale listener.
+  removePostMessageHandler();
+
+  messageListener = (event: MessageEvent) => {
+    const call = extractCall(event.data);
+    if (!call || typeof call.command !== 'string') return;
+
+    tcfApiHandler(
+      call.command,
+      call.version,
+      (returnValue, success) => {
+        const response = {
+          __tcfapiReturn: {
+            returnValue,
+            success,
+            callId: call.callId,
+          },
+        };
+        const wire =
+          typeof event.data === 'string' ? JSON.stringify(response) : response;
+
+        if (event.source && 'postMessage' in event.source) {
+          // sandboxed/null-origin iframes report ``"null"`` and require ``*``
+          const target = event.origin && event.origin !== 'null' ? event.origin : '*';
+          (event.source as Window).postMessage(wire, target);
+        }
+      },
+      call.parameter
+    );
+  };
+
+  window.addEventListener('message', messageListener);
+}
+
+/** Remove the postMessage listener (idempotent). */
+function removePostMessageHandler(): void {
+  if (messageListener && typeof window !== 'undefined') {
+    window.removeEventListener('message', messageListener);
+  }
+  messageListener = null;
+}
+
 /** Process any queued __tcfapi calls from the stub. */
 function processQueuedCalls(): void {
   if (typeof window === 'undefined') return;
@@ -825,15 +959,19 @@ export function installTcfApi(
     window.__tcfapi = tcfApiHandler;
   }
 
+  installLocatorFrame();
+  installPostMessageHandler();
   processQueuedCalls();
 }
 
-/** Remove the __tcfapi global. */
+/** Remove the __tcfapi global, locator iframe, and message listener. */
 export function removeTcfApi(): void {
   if (typeof window !== 'undefined') {
     delete window.__tcfapi;
     delete window.__tcfapiQueue;
   }
+  removePostMessageHandler();
+  removeLocatorFrame();
   apiState = null;
 }
 
