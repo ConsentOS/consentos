@@ -11,9 +11,10 @@
  *   removeEventListener) with the v2.3 ``disclosedVendors`` field on
  *   TCData and ``apiVersion: '2.3'`` on ping.
  *
- * Note on tcfPolicyVersion: remains 4 in v2.3. The IAB Tech Lab spec
- * change (PR #404) is structural — a new mandatory segment plus an
- * additive TCData field — not a policy version bump.
+ * Note on tcfPolicyVersion: bumped to 5 for v2.3 to signal that the
+ * mandatory DisclosedVendors segment is supported. Verified against
+ * the live GVL at ``vendor-list.consensu.org/v3`` (which now ships
+ * ``"tcfPolicyVersion": 5``).
  *
  * @see https://github.com/InteractiveAdvertisingBureau/GDPR-Transparency-and-Consent-Framework
  * @see https://iabeurope.eu/all-you-need-to-know-about-the-transition-to-tcf-v2-3/
@@ -51,7 +52,11 @@ export interface TCModel {
   consentLanguage: string;
   /** Version of the GVL used to create this TC string. */
   vendorListVersion: number;
-  /** TCF policy version — 4 (unchanged in v2.3; structural changes only). */
+  /**
+   * TCF policy version — bumped to 5 for v2.3 to signal that the
+   * mandatory DisclosedVendors segment is supported. Verified
+   * against the live GVL at ``vendor-list.consensu.org/v3``.
+   */
   tcfPolicyVersion: number;
   /** Whether this TC string is specific to this service. */
   isServiceSpecific: boolean;
@@ -324,7 +329,7 @@ export function createTCModel(overrides?: Partial<TCModel>): TCModel {
     consentScreen: 1,
     consentLanguage: 'EN',
     vendorListVersion: 0,
-    tcfPolicyVersion: 4,
+    tcfPolicyVersion: 5,
     isServiceSpecific: true,
     useNonStandardTexts: false,
     specialFeatureOptIns: new Set(),
@@ -691,7 +696,7 @@ function buildTCData(
 
   return {
     tcString: state.tcString,
-    tcfPolicyVersion: model?.tcfPolicyVersion ?? 4,
+    tcfPolicyVersion: model?.tcfPolicyVersion ?? 5,
     cmpId: state.cmpId,
     cmpVersion: state.cmpVersion,
     gdprApplies: state.gdprApplies,
@@ -743,7 +748,7 @@ function tcfApiHandler(
         cmpVersion: apiState.cmpVersion,
         cmpId: apiState.cmpId,
         gvlVersion: apiState.tcModel?.vendorListVersion ?? 0,
-        tcfPolicyVersion: apiState.tcModel?.tcfPolicyVersion ?? 4,
+        tcfPolicyVersion: apiState.tcModel?.tcfPolicyVersion ?? 5,
       };
       callback(pingReturn, true);
       break;
