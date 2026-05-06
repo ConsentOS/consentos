@@ -59,11 +59,16 @@ app.conf.beat_schedule = {
         "task": "src.tasks.telemetry.send_heartbeat",
         "schedule": crontab(hour="2", minute="30"),  # Daily at 02:30 UTC
     },
+    "iab-gvl-refresh": {
+        "task": "src.tasks.iab_gvl.refresh_gvl",
+        "schedule": crontab(hour="3", minute="15"),  # Daily at 03:15 UTC
+    },
 }
 
 # ── Explicit task imports ───────────────────────────────────────────
 # Must be at the bottom to avoid circular imports. These ensure the
 # worker process registers all @app.task definitions on startup.
+import src.tasks.iab_gvl  # noqa: E402
 import src.tasks.retention  # noqa: E402
 import src.tasks.scanner  # noqa: E402
 import src.tasks.telemetry  # noqa: E402, F401

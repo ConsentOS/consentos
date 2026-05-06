@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     scanner_service_url: str = "http://localhost:8001"
     scanner_timeout_seconds: int = 300
 
+    # IAB Global Vendor List — fetched daily by ``src.tasks.iab_gvl``
+    # and cached in the ``iab_*`` tables (CMP-68). The default points at
+    # the canonical IAB-hosted v3 GVL; override only when running offline
+    # or pointing at a mirror for development.
+    iab_gvl_url: str = "https://vendor-list.consensu.org/v3/vendor-list.json"
+    iab_gvl_timeout_seconds: int = 30
+
     # Extra GeoIP country header — checked *before* the built-in list
     # (``cf-ipcountry``, ``x-vercel-ip-country``, ``x-appengine-country``,
     # ``x-country-code``). Set this when running behind a CDN/load

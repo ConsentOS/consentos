@@ -1,6 +1,15 @@
 from src.models.base import Base
 from src.models.consent import ConsentRecord
 from src.models.cookie import Cookie, CookieAllowListEntry, CookieCategory, KnownCookie
+from src.models.iab_gvl import (
+    IabDataCategory,
+    IabFeature,
+    IabGvlMeta,
+    IabPurpose,
+    IabSpecialFeature,
+    IabSpecialPurpose,
+    IabVendor,
+)
 from src.models.instance import Instance
 from src.models.org_config import OrgConfig
 from src.models.organisation import Organisation
@@ -18,6 +27,13 @@ __all__ = [
     "Cookie",
     "CookieAllowListEntry",
     "CookieCategory",
+    "IabDataCategory",
+    "IabFeature",
+    "IabGvlMeta",
+    "IabPurpose",
+    "IabSpecialFeature",
+    "IabSpecialPurpose",
+    "IabVendor",
     "Instance",
     "KnownCookie",
     "OrgConfig",

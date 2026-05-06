@@ -18,6 +18,7 @@ from src.routers import (
     consent_bridge,
     cookies,
     hosted_pages,
+    iab_gvl,
     org_config,
     organisations,
     scanner,
@@ -141,6 +142,7 @@ def create_app() -> FastAPI:
     app.include_router(site_group_config.router, prefix=api_prefix)
     app.include_router(sites.router, prefix=api_prefix)
     app.include_router(cookies.router, prefix=api_prefix)
+    app.include_router(iab_gvl.router, prefix=api_prefix)
     app.include_router(translations.router, prefix=api_prefix)
     app.include_router(translations.public_router, prefix=api_prefix)
 
