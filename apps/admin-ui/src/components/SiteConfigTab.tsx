@@ -2,9 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 
+import { getGvlMeta } from '../api/iab-gvl';
 import { getConfigInheritance, updateSiteConfig } from '../api/sites';
 import { trackConfigChange } from '../services/analytics';
 import type { ConfigInheritanceResponse, ConfigSource, SiteConfig } from '../types/api';
+import IabVendorPicker from './IabVendorPicker';
 import { Alert } from './ui/alert';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -110,6 +112,9 @@ export default function SiteConfigTab({ siteId, config }: Props) {
   const queryClient = useQueryClient();
   const [blockingMode, setBlockingMode] = useState<string>(config?.blocking_mode ?? 'opt_in');
   const [tcfEnabled, setTcfEnabled] = useState(config?.tcf_enabled ?? false);
+  const [disclosedVendorIds, setDisclosedVendorIds] = useState<number[]>(
+    config?.disclosed_vendor_ids ?? [],
+  );
   const [gcmEnabled, setGcmEnabled] = useState(config?.gcm_enabled ?? true);
   const [shopifyEnabled, setShopifyEnabled] = useState(config?.shopify_privacy_enabled ?? false);
   const [consentExpiry, setConsentExpiry] = useState(config?.consent_expiry_days ?? 365);
@@ -140,6 +145,16 @@ export default function SiteConfigTab({ siteId, config }: Props) {
     enabled: !!siteId,
   });
 
+  // Surface the cached GVL version next to the TCF toggle. Banners
+  // stamp this onto every TC string they emit, so operators want to
+  // see at a glance which list version their disclosure is built
+  // against.
+  const { data: gvlMeta } = useQuery({
+    queryKey: ['iab', 'gvl-meta'],
+    queryFn: getGvlMeta,
+    staleTime: 5 * 60_000,
+  });
+
   const mutation = useMutation({
     mutationFn: (body: Record<string, unknown>) => updateSiteConfig(siteId, body as Partial<SiteConfig>),
     onSuccess: () => {
@@ -162,6 +177,9 @@ export default function SiteConfigTab({ siteId, config }: Props) {
     const body: Record<string, unknown> = {
       blocking_mode: blockingMode,
       tcf_enabled: tcfEnabled,
+      // Empty selection clears the override and falls back to the
+      // cascade (group → org → []). Non-empty wins per the resolver.
+      disclosed_vendor_ids: disclosedVendorIds.length > 0 ? disclosedVendorIds : null,
       gcm_enabled: gcmEnabled,
       shopify_privacy_enabled: shopifyEnabled,
       consent_expiry_days: consentExpiry,
@@ -302,12 +320,83 @@ export default function SiteConfigTab({ siteId, config }: Props) {
               className="h-4 w-4 rounded border-border text-primary"
             />
             <div className="flex items-center">
-              <span className="text-sm font-medium text-text-secondary">IAB TCF v2.2</span>
+              <span className="text-sm font-medium text-text-secondary">IAB TCF v2.3</span>
               <SourceBadge source={getSource('tcf_enabled')} field="TCF" />
               <ResetButton field="tcf_enabled" inheritance={inheritance} onReset={() => markReset('tcf_enabled')} />
             </div>
           </label>
           <p className="ml-7 text-xs text-text-secondary">Enable Transparency and Consent Framework</p>
+
+          {tcfEnabled && (
+            <div className="ml-7 mt-3 space-y-4 rounded-lg border border-border bg-surface p-4">
+              {/* GVL info — operators need to know which list version
+                  their disclosure ships against. */}
+              <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                <div>
+                  <div className="text-text-secondary">GVL version</div>
+                  <div className="font-mono text-foreground">
+                    {gvlMeta ? gvlMeta.vendor_list_version : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-secondary">TCF policy</div>
+                  <div className="font-mono text-foreground">
+                    {gvlMeta ? `v${gvlMeta.tcf_policy_version}` : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-secondary">List updated</div>
+                  <div className="font-mono text-foreground">
+                    {gvlMeta ? new Date(gvlMeta.last_updated).toISOString().slice(0, 10) : '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-text-secondary">Synced</div>
+                  <div className="font-mono text-foreground">
+                    {gvlMeta ? new Date(gvlMeta.synced_at).toISOString().slice(0, 10) : '—'}
+                  </div>
+                </div>
+              </div>
+              {!gvlMeta && (
+                <p className="text-xs text-text-secondary">
+                  The IAB Global Vendor List has not been synced yet. The daily
+                  refresh runs at 03:15 UTC; trigger it manually with{' '}
+                  <code className="font-mono">celery -A src.celery_app call src.tasks.iab_gvl.refresh_gvl</code>.
+                </p>
+              )}
+
+              {/* Disclosed vendors picker */}
+              <div>
+                <div className="mb-2 flex items-center">
+                  <span className="text-sm font-medium text-text-secondary">
+                    Disclosed vendors
+                  </span>
+                  <SourceBadge
+                    source={getSource('disclosed_vendor_ids')}
+                    field="disclosed vendors"
+                  />
+                  <ResetButton
+                    field="disclosed_vendor_ids"
+                    inheritance={inheritance}
+                    onReset={() => {
+                      markReset('disclosed_vendor_ids');
+                      setDisclosedVendorIds([]);
+                    }}
+                  />
+                </div>
+                <p className="mb-3 text-xs text-text-secondary">
+                  Vendors listed here are encoded into the TCF v2.3
+                  DisclosedVendors segment of every TC string the banner emits.
+                  These are the vendors your CMP UI is declaring it has shown
+                  to the user.
+                </p>
+                <IabVendorPicker
+                  value={disclosedVendorIds}
+                  onChange={setDisclosedVendorIds}
+                />
+              </div>
+            </div>
+          )}
 
           <label className="flex items-center gap-3">
             <input

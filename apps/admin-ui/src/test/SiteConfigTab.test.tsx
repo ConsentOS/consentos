@@ -7,6 +7,23 @@ import type { SiteConfig } from '../types/api';
 
 vi.mock('../api/sites', () => ({
   updateSiteConfig: vi.fn(() => Promise.resolve({})),
+  getConfigInheritance: vi.fn(() => Promise.resolve(null)),
+}));
+
+vi.mock('../api/iab-gvl', () => ({
+  getGvlMeta: vi.fn(() =>
+    Promise.resolve({
+      gvl_specification_version: 3,
+      vendor_list_version: 157,
+      tcf_policy_version: 5,
+      last_updated: '2026-04-30T16:00:00Z',
+      synced_at: '2026-05-06T10:49:10Z',
+    }),
+  ),
+  listVendors: vi.fn(() =>
+    Promise.resolve({ items: [], total: 0, limit: 50, offset: 0 }),
+  ),
+  getVendor: vi.fn(),
 }));
 
 function createQueryClient() {
@@ -43,6 +60,7 @@ const BASE_CONFIG: SiteConfig = {
   scan_max_pages: 50,
   scan_schedule_cron: null,
   enabled_categories: null,
+  disclosed_vendor_ids: null,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
@@ -65,7 +83,7 @@ describe('SiteConfigTab', () => {
     );
 
     expect(screen.getByText('Standards & integrations')).toBeInTheDocument();
-    expect(screen.getByText('IAB TCF v2.2')).toBeInTheDocument();
+    expect(screen.getByText('IAB TCF v2.3')).toBeInTheDocument();
     expect(screen.getByText('Google Consent Mode v2')).toBeInTheDocument();
   });
 
@@ -262,5 +280,63 @@ describe('SiteConfigTab', () => {
     );
 
     expect(screen.getByText('Save configuration')).toBeInTheDocument();
+  });
+
+  describe('TCF v2.3', () => {
+    it('labels the TCF toggle as v2.3', () => {
+      renderWithProviders(<SiteConfigTab siteId="site-1" config={BASE_CONFIG} />);
+      expect(screen.getByText('IAB TCF v2.3')).toBeInTheDocument();
+    });
+
+    it('hides the disclosed-vendors picker when TCF is disabled', () => {
+      renderWithProviders(<SiteConfigTab siteId="site-1" config={BASE_CONFIG} />);
+      expect(screen.queryByText('Disclosed vendors')).not.toBeInTheDocument();
+    });
+
+    it('shows the disclosed-vendors picker + GVL info card when TCF is enabled', async () => {
+      const config: SiteConfig = { ...BASE_CONFIG, tcf_enabled: true };
+      renderWithProviders(<SiteConfigTab siteId="site-1" config={config} />);
+      expect(screen.getByText('Disclosed vendors')).toBeInTheDocument();
+      expect(screen.getByText('GVL version')).toBeInTheDocument();
+      // Wait for the GVL meta query to populate the card.
+      await waitFor(() => {
+        expect(screen.getByText('157')).toBeInTheDocument();
+      });
+      expect(screen.getByText('v5')).toBeInTheDocument();
+    });
+
+    it('submits disclosed_vendor_ids as null when the selection is empty', async () => {
+      const sitesApi = await import('../api/sites');
+      const spy = vi.mocked(sitesApi.updateSiteConfig);
+      spy.mockClear();
+
+      const config: SiteConfig = { ...BASE_CONFIG, tcf_enabled: true };
+      renderWithProviders(<SiteConfigTab siteId="site-1" config={config} />);
+
+      fireEvent.click(screen.getByText('Save configuration'));
+
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+      const submitted = spy.mock.calls[0][1] as Record<string, unknown>;
+      expect(submitted.disclosed_vendor_ids).toBeNull();
+    });
+
+    it('submits disclosed_vendor_ids as the configured array when set', async () => {
+      const sitesApi = await import('../api/sites');
+      const spy = vi.mocked(sitesApi.updateSiteConfig);
+      spy.mockClear();
+
+      const config: SiteConfig = {
+        ...BASE_CONFIG,
+        tcf_enabled: true,
+        disclosed_vendor_ids: [1, 2, 755],
+      };
+      renderWithProviders(<SiteConfigTab siteId="site-1" config={config} />);
+
+      fireEvent.click(screen.getByText('Save configuration'));
+
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(1));
+      const submitted = spy.mock.calls[0][1] as Record<string, unknown>;
+      expect(submitted.disclosed_vendor_ids).toEqual([1, 2, 755]);
+    });
   });
 });

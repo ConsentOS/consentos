@@ -45,6 +45,7 @@ const BASE_CONFIG: SiteConfig = {
   scan_max_pages: 50,
   scan_schedule_cron: null,
   enabled_categories: null,
+  disclosed_vendor_ids: null,
   created_at: '2025-01-01T00:00:00Z',
   updated_at: '2025-01-01T00:00:00Z',
 };
