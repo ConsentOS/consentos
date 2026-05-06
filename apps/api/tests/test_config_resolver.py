@@ -7,6 +7,7 @@ import pytest
 from src.services.config_resolver import (
     ALL_CATEGORIES,
     SYSTEM_DEFAULTS,
+    _normalise_disclosed_vendor_ids,
     _normalise_enabled_categories,
     build_public_config,
     resolve_config,
@@ -327,3 +328,52 @@ class TestEnabledCategories:
 
     def test_normalise_preserves_explicit_full_list(self):
         assert _normalise_enabled_categories(list(ALL_CATEGORIES)) == ALL_CATEGORIES
+
+
+class TestDisclosedVendorIds:
+    """Cascade and normalisation for the TCF v2.3 DisclosedVendors plumbing."""
+
+    def test_system_default_is_empty(self):
+        result = resolve_config({})
+        # System default; unconfigured installs ship an empty DisclosedVendors
+        # segment (spec-valid, operationally meaningless until populated).
+        assert result["disclosed_vendor_ids"] == []
+
+    def test_site_override_takes_precedence(self):
+        org = {"disclosed_vendor_ids": [1, 2, 3]}
+        group = {"disclosed_vendor_ids": [10, 20]}
+        site = {"disclosed_vendor_ids": [100, 200]}
+        result = resolve_config(site, org_defaults=org, group_defaults=group)
+        assert result["disclosed_vendor_ids"] == [100, 200]
+
+    def test_group_override_takes_precedence_over_org(self):
+        org = {"disclosed_vendor_ids": [1, 2]}
+        group = {"disclosed_vendor_ids": [10, 20]}
+        result = resolve_config({}, org_defaults=org, group_defaults=group)
+        assert result["disclosed_vendor_ids"] == [10, 20]
+
+    def test_org_default_inherited_when_site_unset(self):
+        org = {"disclosed_vendor_ids": [42, 100]}
+        result = resolve_config({}, org_defaults=org)
+        assert result["disclosed_vendor_ids"] == [42, 100]
+
+    def test_public_config_normalises_to_sorted_unique_ints(self):
+        resolved = resolve_config({"disclosed_vendor_ids": [5, 1, 5, 3, 1]})
+        public = build_public_config("site-xyz", resolved)
+        assert public["disclosed_vendor_ids"] == [1, 3, 5]
+
+    def test_normalise_strips_non_int_garbage(self):
+        # A misconfigured admin save could land strings/booleans/zero/negatives
+        # in JSONB. The banner is fed a deterministic shape regardless.
+        assert _normalise_disclosed_vendor_ids([1, "2", 0, -3, True, 4.5, 7]) == [1, 7]
+
+    def test_normalise_handles_none(self):
+        assert _normalise_disclosed_vendor_ids(None) == []
+
+    def test_normalise_handles_non_list(self):
+        assert _normalise_disclosed_vendor_ids("not a list") == []
+        assert _normalise_disclosed_vendor_ids(42) == []
+        assert _normalise_disclosed_vendor_ids({"1": True}) == []
+
+    def test_normalise_dedupes_and_sorts(self):
+        assert _normalise_disclosed_vendor_ids([5, 1, 5, 3, 1, 5]) == [1, 3, 5]

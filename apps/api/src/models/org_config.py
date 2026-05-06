@@ -57,6 +57,9 @@ class OrgConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # the full cascade semantics.
     enabled_categories: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # IAB vendor IDs disclosed in the CMP UI (TCF v2.3). NULL = inherit.
+    disclosed_vendor_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # Scanning
     scan_schedule_cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
     scan_max_pages: Mapped[int | None] = mapped_column(Integer, nullable=True)

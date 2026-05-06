@@ -58,6 +58,11 @@ class SiteConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # accidentally drop it.
     enabled_categories: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # IAB vendor IDs disclosed to the user in the CMP UI (TCF v2.3
+    # DisclosedVendors segment). When NULL, inherits from the cascade
+    # (site-group → org → system default of an empty list).
+    disclosed_vendor_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # Scanning
     scan_schedule_cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
     scan_max_pages: Mapped[int] = mapped_column(Integer, server_default="50", nullable=False)
