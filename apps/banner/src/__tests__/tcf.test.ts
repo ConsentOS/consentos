@@ -211,7 +211,7 @@ describe('createTCModel', () => {
   it('creates a model with defaults', () => {
     const model = createTCModel();
     expect(model.version).toBe(2);
-    expect(model.tcfPolicyVersion).toBe(4);
+    expect(model.tcfPolicyVersion).toBe(5);
     expect(model.isServiceSpecific).toBe(true);
     expect(model.consentLanguage).toBe('EN');
     expect(model.publisherCC).toBe('GB');
@@ -266,7 +266,7 @@ describe('encodeTCString / decodeTCString', () => {
     expect(decoded.consentLanguage).toBe('EN');
     expect(decoded.publisherCC).toBe('GB');
     expect(decoded.isServiceSpecific).toBe(true);
-    expect(decoded.tcfPolicyVersion).toBe(4);
+    expect(decoded.tcfPolicyVersion).toBe(5);
   });
 
   it('round-trips purpose consents', () => {
@@ -396,7 +396,7 @@ describe('encodeTCString / decodeTCString', () => {
       consentScreen: 2,
       consentLanguage: 'DE',
       vendorListVersion: 150,
-      tcfPolicyVersion: 4,
+      tcfPolicyVersion: 5,
       isServiceSpecific: false,
       useNonStandardTexts: false,
       specialFeatureOptIns: new Set([1, 2]),
@@ -426,7 +426,7 @@ describe('encodeTCString / decodeTCString', () => {
     expect(decoded.consentScreen).toBe(2);
     expect(decoded.consentLanguage).toBe('DE');
     expect(decoded.vendorListVersion).toBe(150);
-    expect(decoded.tcfPolicyVersion).toBe(4);
+    expect(decoded.tcfPolicyVersion).toBe(5);
     expect(decoded.isServiceSpecific).toBe(false);
     expect(decoded.purposeConsents).toEqual(new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
     expect(decoded.purposeLegitimateInterests).toEqual(new Set([2, 7, 9, 10]));
@@ -512,7 +512,7 @@ describe('__tcfapi interface', () => {
           apiVersion: '2.3',
           cmpVersion: 3,
           cmpId: 42,
-          tcfPolicyVersion: 4,
+          tcfPolicyVersion: 5,
         }),
         true
       );
@@ -943,11 +943,11 @@ describe('TCF v2.3 — DisclosedVendors segment', () => {
     expect(decoded.disclosedVendors.size).toBe(0);
   });
 
-  it('keeps tcfPolicyVersion at 4 (v2.3 changes are structural, not policy)', () => {
+  it('uses tcfPolicyVersion 5 for v2.3 (matches the live GVL)', () => {
     const model = createTCModel();
-    expect(model.tcfPolicyVersion).toBe(4);
+    expect(model.tcfPolicyVersion).toBe(5);
     const tc = encodeTCString(model);
-    expect(decodeTCString(tc).tcfPolicyVersion).toBe(4);
+    expect(decodeTCString(tc).tcfPolicyVersion).toBe(5);
   });
 });
 
