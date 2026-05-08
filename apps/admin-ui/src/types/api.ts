@@ -139,6 +139,11 @@ export interface SiteConfig {
    * implicit and re-added by the resolver if missing.
    */
   enabled_categories: CategorySlug[] | null;
+  /**
+   * IAB vendor IDs disclosed to users in the CMP UI (TCF v2.3
+   * DisclosedVendors segment). ``null`` = inherit from the cascade.
+   */
+  disclosed_vendor_ids: number[] | null;
   created_at: string;
   updated_at: string;
 }
