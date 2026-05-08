@@ -3,7 +3,7 @@
  *
  * Implements the client-side JavaScript API that ad tech vendors call to
  * retrieve the user's consent state under the Global Privacy Platform.
- * Analogous to `__tcfapi()` for TCF v2.2.
+ * Analogous to `__tcfapi()` for TCF v2.3.
  *
  * Supported commands: ping, getGPPData, getSection, hasSection,
  * addEventListener, removeEventListener.

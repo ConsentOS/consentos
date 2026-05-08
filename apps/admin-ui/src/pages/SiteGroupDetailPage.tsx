@@ -302,7 +302,7 @@ export default function SiteGroupDetailPage() {
               </p>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <FormField label="IAB TCF v2.2">
+                <FormField label="IAB TCF v2.3">
                   <Select
                     value={tcfEnabled}
                     onChange={(e) => setTcfEnabled(e.target.value)}

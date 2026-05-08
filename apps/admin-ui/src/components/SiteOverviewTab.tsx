@@ -77,7 +77,7 @@ export default function SiteOverviewTab({ site, config }: Props) {
       <Card className="p-6">
         <h3 className="font-heading mb-4 text-sm font-semibold text-foreground">Features</h3>
         <div className="grid grid-cols-2 gap-3">
-          <FeatureItem label="TCF v2.2" enabled={config?.tcf_enabled ?? false} />
+          <FeatureItem label="TCF v2.3" enabled={config?.tcf_enabled ?? false} />
           <FeatureItem label="Google Consent Mode" enabled={config?.gcm_enabled ?? false} />
           <FeatureItem label="Auto-blocking" enabled={config?.blocking_mode !== 'informational'} />
           <FeatureItem label="Custom banner" enabled={!!config?.banner_config} />
