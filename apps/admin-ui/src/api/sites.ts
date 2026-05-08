@@ -38,7 +38,10 @@ export async function updateSiteConfig(
   siteId: string,
   body: Partial<SiteConfig>,
 ): Promise<SiteConfig> {
-  const { data } = await apiClient.put<SiteConfig>(`/sites/${siteId}/config`, body);
+  // PATCH (not PUT) so unsupplied fields aren't wiped to schema
+  // defaults — the categories tab and the configuration tab each
+  // submit only their own fields and must not clobber the other's.
+  const { data } = await apiClient.patch<SiteConfig>(`/sites/${siteId}/config`, body);
   return data;
 }
 
