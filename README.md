@@ -22,7 +22,7 @@ ConsentOS gives you a single `<script>` tag to embed on your site and a self-hos
 ## Why ConsentOS
 
 - **Privacy by design, not by default.** Consent is given, not assumed. Auto-blocking is on by default; visitors don't get tracked until they opt in.
-- **Standards-complete.** IAB TCF v2.2, GPP v1 (six US state sections), Google Consent Mode v2, GPC, Shopify Customer Privacy API.
+- **Standards-complete.** IAB TCF v2.3, GPP v1 (six US state sections), Google Consent Mode v2, GPC, Shopify Customer Privacy API.
 - **Yours to host.** Source-available under the Elastic Licence 2.0 — you can self-host indefinitely, modify freely, and run it on your own infrastructure.
 - **Built for compliance teams.** Rule-based compliance checks for GDPR, CNIL, CCPA/CPRA, ePrivacy and LGPD, plus a tamper-evident consent record audit trail.
 - **Multi-tenant from day one.** Organisations, sites, role-based access. Configuration cascades System → Org → Site Group → Site → Region.
@@ -49,7 +49,7 @@ ConsentOS gives you a single `<script>` tag to embed on your site and a self-hos
 │  │ Consent     │  │ Script   │  │ Banner UI     │   │
 │  │ Loader (2KB)│→ │ Blocker  │  │ (Shadow DOM)  │   │
 │  └──────┬──────┘  └──────────┘  └───────────────┘   │
-│         │  TCF v2.2  ·  GCM v2  ·  GPP v1  ·  GPC   │
+│         │  TCF v2.3  ·  GCM v2  ·  GPP v1  ·  GPC   │
 └─────────┼───────────────────────────────────────────┘
           │
           ▼
