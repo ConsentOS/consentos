@@ -55,6 +55,13 @@ services:
       retries: 3
     ports:
       - "127.0.0.1:11001:8000"
+    networks:
+      # ``api`` alias matches the dev compose service name so the
+      # admin-UI nginx ``proxy_pass http://api:8000`` works unchanged
+      # in prod (container_name is ``consentos-api``).
+      default:
+        aliases:
+          - api
     deploy:
       resources:
         limits:
