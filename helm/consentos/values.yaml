@@ -62,7 +62,7 @@ postgresql:
   enabled: true
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "17-alpine"
   auth:
     database: consentos
     username: consentos
