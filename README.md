@@ -81,12 +81,20 @@ git clone https://github.com/consentos/consentos.git
 cd consentos
 cp .env.example .env
 
+# Set the initial admin credentials in .env before the next step. These
+# are used once on first run to provision your login; you can rotate
+# the password from the admin UI afterwards.
+#   INITIAL_ADMIN_EMAIL=you@example.com
+#   INITIAL_ADMIN_PASSWORD=change-me-immediately
+
 # Start the dev environment
 make up
 
-# Run migrations and seed cookie categories
+# Run migrations, create the initial admin + organisation, seed cookies
 make seed
 ```
+
+You can now log in at `http://localhost:5173` with the credentials you set above.
 
 | Service   | URL                        |
 |-----------|----------------------------|
@@ -95,14 +103,13 @@ make seed
 
 The admin UI dog-foods the banner script at `http://localhost:5173/banner/consent-loader.js`. In production you'd publish those files to a CDN and point `CDN_BASE_URL` at it.
 
-### Bootstrapping the first organisation
+### Creating additional organisations
 
-The `POST /api/v1/organisations/` endpoint is gated behind a static admin token by default. To create your initial organisation:
+`make seed` provisions a single organisation and owner. To create more tenants later:
 
-1. Set `ADMIN_BOOTSTRAP_TOKEN` in `.env` to a strong random value (`openssl rand -hex 32`)
-2. Restart the API
-3. `curl -X POST http://localhost:8000/api/v1/organisations/ -H "X-Admin-Bootstrap-Token: <your-token>" -H "Content-Type: application/json" -d '{"name": "Acme", "slug": "acme"}'`
-4. Unset or rotate `ADMIN_BOOTSTRAP_TOKEN` once your org is created — leaving it set means anyone with the value can keep creating tenants.
+1. Set `ADMIN_BOOTSTRAP_TOKEN` in `.env` to a strong random value (`openssl rand -hex 32`) and restart the API
+2. `curl -X POST http://localhost:8000/api/v1/organisations/ -H "X-Admin-Bootstrap-Token: <your-token>" -H "Content-Type: application/json" -d '{"name": "Acme", "slug": "acme"}'`
+3. Unset or rotate `ADMIN_BOOTSTRAP_TOKEN` once you're done — leaving it set means anyone with the value can keep creating tenants.
 
 ### Running tests
 

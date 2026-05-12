@@ -1,4 +1,4 @@
-.PHONY: up down restart logs migrate seed test lint fmt check clean test-infra-up test-infra-down
+.PHONY: up down restart logs migrate seed bootstrap test lint fmt check clean test-infra-up test-infra-down
 
 # ── Development environment ──────────────────────────────────────────
 
@@ -25,7 +25,10 @@ migrate:
 migrate-offline:
 	cd apps/api && DATABASE_URL=postgresql+asyncpg://consentos:consentos@localhost:5432/consentos alembic upgrade head
 
-seed: migrate
+bootstrap:
+	docker compose exec api python -m src.cli.bootstrap_admin
+
+seed: migrate bootstrap
 	docker compose exec api python -m src.cli.seed_known_cookies --clear
 
 rollback:
