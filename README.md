@@ -109,7 +109,7 @@ The admin UI dog-foods the banner script at `http://localhost:5173/banner/consen
 
 1. Set `ADMIN_BOOTSTRAP_TOKEN` in `.env` to a strong random value (`openssl rand -hex 32`) and restart the API
 2. `curl -X POST http://localhost:8000/api/v1/organisations/ -H "X-Admin-Bootstrap-Token: <your-token>" -H "Content-Type: application/json" -d '{"name": "Acme", "slug": "acme"}'`
-3. Unset or rotate `ADMIN_BOOTSTRAP_TOKEN` once you're done — leaving it set means anyone with the value can keep creating tenants.
+3. Unset or rotate `ADMIN_BOOTSTRAP_TOKEN` once you're done. Leaving it set means anyone with the value can keep creating tenants.
 
 ### Running tests
 
