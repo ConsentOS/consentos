@@ -107,7 +107,6 @@ export default function SiteOverviewTab({ site, config }: Props) {
         </div>
       </Card>
 
-      {/* Danger zone */}
       <Card className="border-status-error-fg/30 p-6">
         <h3 className="font-heading mb-2 text-sm font-semibold text-status-error-fg">
           Danger zone
