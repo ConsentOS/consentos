@@ -12,6 +12,7 @@ import { Alert } from './ui/alert';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { FormField } from './ui/form-field';
+import { InfoTooltip } from './ui/info-tooltip';
 import { Input } from './ui/input';
 import { Select } from './ui/select';
 
@@ -256,14 +257,25 @@ export default function SiteConfigTab({ siteId, config }: Props) {
               </FormField>
               <SourceBadge source={getSource('blocking_mode')} field="blocking mode" />
               <ResetButton field="blocking_mode" inheritance={inheritance} onReset={() => markReset('blocking_mode')} />
+              <InfoTooltip
+                label="What this mode is for"
+                content={
+                  <>
+                    <p className="mb-2 font-semibold text-foreground">
+                      Used when the visitor's region can't be resolved
+                    </p>
+                    <p>
+                      Applies to traffic with no CDN headers: internal
+                      callers, healthchecks, misconfigured edges. The
+                      Regional modes card below overrides this whenever
+                      the country <em>is</em> known. For safety, pick
+                      the most restrictive mode acceptable for
+                      unknown-location traffic.
+                    </p>
+                  </>
+                }
+              />
             </div>
-            <p className="mt-1 text-xs text-text-secondary">
-              Used when the visitor's region can't be resolved (CDN
-              header missing, internal traffic, healthchecks). The
-              Regional modes card below overrides this whenever the
-              country is known. For safety, pick the most restrictive
-              mode acceptable for unknown-location traffic.
-            </p>
           </div>
 
           <div>
@@ -332,8 +344,37 @@ export default function SiteConfigTab({ siteId, config }: Props) {
               markReset('regional_modes');
             }}
           />
+          <InfoTooltip
+            label="How regional matching and fallback works"
+            content={
+              <>
+                <p className="mb-2 font-semibold text-foreground">
+                  Two fallback paths, deliberately separate
+                </p>
+                <ul className="list-disc space-y-1 pl-5">
+                  <li>
+                    <code className="font-mono">DEFAULT</code> kicks in
+                    when the visitor's country <em>is</em> known but
+                    you haven't written a rule for it. The "rest of
+                    world" mode for known visitors.
+                  </li>
+                  <li>
+                    The site-level Blocking mode kicks in when the
+                    country <em>can't</em> be resolved at all
+                    (healthchecks, internal callers, misconfigured
+                    edges).
+                  </li>
+                </ul>
+                <p className="mt-2">
+                  Kept separate so you can be strict with
+                  unknown-location traffic without forcing the same
+                  mode on every known country lacking a specific rule.
+                </p>
+              </>
+            }
+          />
         </div>
-        <p className="mb-3 text-sm text-text-secondary">
+        <p className="mb-4 text-sm text-text-secondary">
           Pick a different blocking mode per region. Matching runs from
           most specific to least:{' '}
           <code className="rounded bg-surface px-1">US-CA</code>{' '}
@@ -342,38 +383,9 @@ export default function SiteConfigTab({ siteId, config }: Props) {
           then the <code className="rounded bg-surface px-1">EU</code>{' '}
           bloc, then your{' '}
           <code className="rounded bg-surface px-1">DEFAULT</code> row.
-        </p>
-        <Alert variant="info" className="mb-4 text-xs">
-          <p className="mb-1 font-semibold">
-            Two fallback paths, deliberately separate
-          </p>
-          <ul className="list-disc space-y-1 pl-5">
-            <li>
-              <code className="font-mono">DEFAULT</code> below kicks in
-              when the visitor's country <em>is</em> known but you
-              haven't written a rule for it. This is the "rest of
-              world" mode for known visitors.
-            </li>
-            <li>
-              The Blocking mode field above kicks in when the country
-              <em> can't</em> be resolved at all. Used for traffic with
-              no CDN headers: healthchecks, internal callers,
-              misconfigured edges.
-            </li>
-          </ul>
-          <p className="mt-2">
-            They're separate so you can be strict with unknown-location
-            traffic without forcing the same mode on every known
-            country that doesn't have its own rule.
-          </p>
-        </Alert>
-        <p className="mb-4 text-xs text-text-secondary">
           Needs{' '}
           <code className="rounded bg-surface px-1">GEOIP_COUNTRY_HEADER</code>{' '}
-          set on the API. Subdivision matching (
-          <code className="rounded bg-surface px-1">US-CA</code>,{' '}
-          <code className="rounded bg-surface px-1">GB-SCT</code>) also
-          needs{' '}
+          on the API; subdivisions also need{' '}
           <code className="rounded bg-surface px-1">GEOIP_REGION_HEADER</code>.
         </p>
         <RegionalModesEditor value={regionalModes} onChange={setRegionalModes} />
