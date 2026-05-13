@@ -221,7 +221,7 @@ async function init(): Promise<void> {
   // Fetch site config — declared with let as A/B testing may replace it
   let config: SiteConfig;
   try {
-    const resp = await fetch(`${apiBase}/api/v1/config/sites/${siteId}/resolved`);
+    const resp = await fetch(`${apiBase}/api/v1/config/sites/${siteId}/geo-resolved`);
     if (!resp.ok) throw new Error(`Config fetch failed: ${resp.status}`);
     config = await resp.json();
   } catch (err) {
