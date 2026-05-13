@@ -1,7 +1,12 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
+import { deleteSite } from '../api/sites';
+import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { MetricCard } from './ui/metric-card';
+import { Modal } from './ui/modal';
 import type { Site, SiteConfig } from '../types/api';
 
 interface Props {
@@ -12,6 +17,24 @@ interface Props {
 export default function SiteOverviewTab({ site, config }: Props) {
   const scriptTag = `<script src="${window.location.origin}/consent-loader.js" data-site-id="${site.id}" data-api-base="${window.location.origin}"></script>`;
   const [copied, setCopied] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteSite(site.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sites'] });
+      navigate('/sites');
+    },
+  });
+
+  function closeDeleteModal() {
+    setDeleteOpen(false);
+    setConfirmText('');
+    deleteMutation.reset();
+  }
 
   return (
     <div className="space-y-6">
@@ -69,7 +92,7 @@ export default function SiteOverviewTab({ site, config }: Props) {
           </button>
         </div>
         <p className="mt-2 text-xs text-text-secondary">
-          Must be the first {'<script>'} in {'<head>'} — no <code>async</code> or <code>defer</code>.
+          Must be the first {'<script>'} in {'<head>'}, with no <code>async</code> or <code>defer</code>.
         </p>
       </Card>
 
@@ -83,6 +106,67 @@ export default function SiteOverviewTab({ site, config }: Props) {
           <FeatureItem label="Custom banner" enabled={!!config?.banner_config} />
         </div>
       </Card>
+
+      {/* Danger zone */}
+      <Card className="border-status-error-fg/30 p-6">
+        <h3 className="font-heading mb-2 text-sm font-semibold text-status-error-fg">
+          Danger zone
+        </h3>
+        <p className="mb-4 text-sm text-text-secondary">
+          Deleting this site hides it from the dashboard and stops the banner
+          from loading on the domain. Consent records are retained for audit.
+          The deletion is soft, so an administrator can restore the site from
+          the database if needed.
+        </p>
+        <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
+          Delete site
+        </Button>
+      </Card>
+
+      <Modal
+        open={deleteOpen}
+        onClose={closeDeleteModal}
+        title="Delete this site?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">
+            To confirm, type the domain{' '}
+            <code className="rounded bg-mist px-1.5 py-0.5 font-mono text-xs">
+              {site.domain}
+            </code>{' '}
+            below.
+          </p>
+          <input
+            type="text"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder={site.domain}
+            autoFocus
+            aria-label="Type the domain to confirm deletion"
+            className="block w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-copper focus:outline-none"
+          />
+          {deleteMutation.isError && (
+            <p className="text-sm text-status-error-fg">
+              Couldn't delete the site.{' '}
+              {(deleteMutation.error as Error).message ?? 'Please try again.'}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={closeDeleteModal}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={
+                confirmText !== site.domain || deleteMutation.isPending
+              }
+              onClick={() => deleteMutation.mutate()}
+            >
+              {deleteMutation.isPending ? 'Deleting...' : 'Delete site'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
