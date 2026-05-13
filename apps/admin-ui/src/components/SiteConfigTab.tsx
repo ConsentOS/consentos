@@ -7,6 +7,7 @@ import { getConfigInheritance, updateSiteConfig } from '../api/sites';
 import { trackConfigChange } from '../services/analytics';
 import type { ConfigInheritanceResponse, ConfigSource, SiteConfig } from '../types/api';
 import IabVendorPicker from './IabVendorPicker';
+import RegionalModesEditor from './RegionalModesEditor';
 import { Alert } from './ui/alert';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -120,6 +121,9 @@ export default function SiteConfigTab({ siteId, config }: Props) {
   const [consentExpiry, setConsentExpiry] = useState(config?.consent_expiry_days ?? 365);
   const [privacyUrl, setPrivacyUrl] = useState(config?.privacy_policy_url ?? '');
   const [termsUrl, setTermsUrl] = useState(config?.terms_url ?? '');
+  const [regionalModes, setRegionalModes] = useState<Record<string, string> | null>(
+    config?.regional_modes ?? null,
+  );
 
   // GPP state
   const [gppEnabled, setGppEnabled] = useState(config?.gpp_enabled ?? true);
@@ -185,6 +189,7 @@ export default function SiteConfigTab({ siteId, config }: Props) {
       consent_expiry_days: consentExpiry,
       privacy_policy_url: privacyUrl || null,
       terms_url: termsUrl || null,
+      regional_modes: regionalModes,
       gpp_enabled: gppEnabled,
       gpp_supported_apis: gppEnabled ? gppSupportedApis : null,
       gpc_enabled: gpcEnabled,
@@ -306,6 +311,33 @@ export default function SiteConfigTab({ siteId, config }: Props) {
             </p>
           </div>
         </div>
+      </Card>
+
+      <Card className="p-6">
+        <div className="mb-2 flex items-center">
+          <h3 className="font-heading text-sm font-semibold text-foreground">Regional modes</h3>
+          <SourceBadge source={getSource('regional_modes')} field="regional modes" />
+          <ResetButton
+            field="regional_modes"
+            inheritance={inheritance}
+            onReset={() => {
+              setRegionalModes(null);
+              markReset('regional_modes');
+            }}
+          />
+        </div>
+        <p className="mb-4 text-sm text-text-secondary">
+          Override the site-level blocking mode per region. Visitors are
+          matched in order of specificity: ISO 3166-2 subdivision
+          (e.g. <code className="rounded bg-surface px-1">US-CA</code>),
+          then country (<code className="rounded bg-surface px-1">US</code>),
+          then the <code className="rounded bg-surface px-1">EU</code> bloc,
+          then <code className="rounded bg-surface px-1">DEFAULT</code>.
+          Requires <code className="rounded bg-surface px-1">GEOIP_COUNTRY_HEADER</code>
+          {' '}(and optionally <code className="rounded bg-surface px-1">GEOIP_REGION_HEADER</code>)
+          to be set on the API.
+        </p>
+        <RegionalModesEditor value={regionalModes} onChange={setRegionalModes} />
       </Card>
 
       <Card className="p-6">
