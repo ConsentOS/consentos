@@ -1,9 +1,15 @@
-.PHONY: up down restart logs migrate seed bootstrap test lint fmt check clean test-infra-up test-infra-down
+.PHONY: up down restart logs migrate seed bootstrap test lint fmt check clean test-infra-up test-infra-down check-pg-version test-check-pg-version
 
 # ── Development environment ──────────────────────────────────────────
 
-up:
+up: check-pg-version
 	docker compose up -d
+
+check-pg-version:
+	@./scripts/check-pg-version.sh
+
+test-check-pg-version:
+	@./scripts/test-check-pg-version.sh
 
 down:
 	docker compose down

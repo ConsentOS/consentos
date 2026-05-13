@@ -103,6 +103,51 @@ You can now log in at `http://localhost:5173` with the credentials you set above
 
 The admin UI dog-foods the banner script at `http://localhost:5173/banner/consent-loader.js`. In production you'd publish those files to a CDN and point `CDN_BASE_URL` at it.
 
+### Upgrading from PostgreSQL 16
+
+The dev compose ships `postgres:17-alpine`. If your `consentos_pgdata` volume was initialised on an earlier major (e.g. `postgres:16-alpine`), the postgres container fails to start with:
+
+```
+FATAL: database files are incompatible with server
+DETAIL: The data directory was initialized by PostgreSQL version 16
+```
+
+`make up` runs a precheck that surfaces this before the container fails. Two recovery paths:
+
+**Path A: local dev where data is throwaway**
+
+```bash
+make down
+docker volume rm consentos_pgdata
+make up
+make seed
+```
+
+**Path B: preserve data via dump and restore**
+
+```bash
+make down
+
+# Dump from the old volume using a one-shot PG16 container
+docker run --rm -d --name pg16 \
+  -v consentos_pgdata:/var/lib/postgresql/data \
+  -e POSTGRES_USER=consentos -e POSTGRES_PASSWORD=consentos \
+  postgres:16-alpine
+sleep 5
+docker exec pg16 pg_dumpall -U consentos > pgdata-backup.sql
+docker stop pg16
+
+# Recreate volume on PG17 and restore
+docker volume rm consentos_pgdata
+docker compose up -d postgres
+sleep 5
+cat pgdata-backup.sql | docker exec -i consentos-postgres-1 psql -U consentos -d postgres
+
+make up
+```
+
+If you run a Kubernetes deployment (helm chart), follow your cloud provider's managed-Postgres major-version upgrade procedure instead. The volume-level recipe above only applies to the docker-compose deployment.
+
 ### Creating additional organisations
 
 `make seed` provisions a single organisation and owner. To create more tenants later:
