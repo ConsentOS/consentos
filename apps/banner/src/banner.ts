@@ -10,6 +10,7 @@
  */
 
 import { announce, createLiveRegion, focusFirst, onEscape, prefersReducedMotion, trapFocus } from './a11y';
+import { isImplicitConsentMode } from './blocking-mode';
 // NB: intentionally NOT importing from './blocker'. The loader already
 // installed the blocker proxies in its own IIFE module scope, and
 // the bundle can't share that state via a direct import — rollup
@@ -302,6 +303,25 @@ async function init(): Promise<void> {
     return;
   }
 
+  // For opt_out and informational, release the blocker and switch GCM
+  // to granted up-front so tracking runs while the banner is on
+  // screen. The banner still renders so visitors have a visible
+  // opt-out path; pre-fill the Manage Preferences toggles as checked
+  // so the user has to actively uncheck to opt out. Banner dismissal
+  // is treated as implicit acceptance (handled in renderBanner).
+  if (!existingConsent && isImplicitConsentMode(config.blocking_mode)) {
+    const enabled = resolveEnabledCategories(config);
+    updateAcceptedCategories(enabled);
+    if (config.gcm_enabled) {
+      updateGcm(buildGcmStateFromCategories(enabled));
+    }
+    renderBanner(config, t, gpcResult, abAssignment, {
+      prefillCategories: enabled,
+      showCategoriesInitially: false,
+    });
+    return;
+  }
+
   // Cross-domain consent: if this site belongs to a consent group and
   // there's no local consent, try the iframe bridge before showing
   // the banner. The bridge reads a shared cookie on the API domain
@@ -508,8 +528,17 @@ function renderBanner(
 
   // Set up keyboard navigation
   const cleanupFocusTrap = trapFocus(banner);
+  // Dismissal semantics flip per mode. opt_in: reject (no consent =
+  // necessary only). opt_out / informational: implicit accept-all,
+  // because non-action means acceptance under CCPA-style rules.
+  const implicit = isImplicitConsentMode(config.blocking_mode);
+  const dismissAccepted: CategorySlug[] = implicit
+    ? [...enabledCategories]
+    : ['necessary'];
+  const dismissRejected: CategorySlug[] = implicit ? [] : nonEssential;
+
   const cleanupEscape = onEscape(banner, () => {
-    handleConsent(['necessary'], nonEssential, config, gpcResult, abAssignment, t);
+    handleConsent(dismissAccepted, dismissRejected, config, gpcResult, abAssignment, t);
     removeBanner(host, cleanupFocusTrap, cleanupEscape);
   });
 
