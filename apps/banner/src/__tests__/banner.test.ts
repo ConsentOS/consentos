@@ -27,6 +27,7 @@ vi.mock('../gcm', () => ({
   updateGcm: vi.fn(),
 }));
 
+import { isImplicitConsentMode } from '../blocking-mode';
 import { updateAcceptedCategories } from '../blocker';
 import { buildConsentState, readConsent, writeConsent } from '../consent';
 import { buildGcmStateFromCategories, updateGcm } from '../gcm';
@@ -111,6 +112,26 @@ describe('banner', () => {
       expect(config.blocking_mode).toBe('opt_in');
       expect(config.gcm_enabled).toBe(true);
       expect(config.consent_expiry_days).toBe(365);
+    });
+  });
+
+  describe('isImplicitConsentMode', () => {
+    it('returns false for opt_in (GDPR) so dismissal acts as reject', () => {
+      expect(isImplicitConsentMode('opt_in')).toBe(false);
+    });
+
+    it('returns true for opt_out (CCPA-style)', () => {
+      expect(isImplicitConsentMode('opt_out')).toBe(true);
+    });
+
+    it('returns true for informational notice-only mode', () => {
+      expect(isImplicitConsentMode('informational')).toBe(true);
+    });
+
+    it('returns false for unknown or missing modes (safe default)', () => {
+      expect(isImplicitConsentMode(null)).toBe(false);
+      expect(isImplicitConsentMode(undefined)).toBe(false);
+      expect(isImplicitConsentMode('something-else')).toBe(false);
     });
   });
 
