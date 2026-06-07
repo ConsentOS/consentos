@@ -476,8 +476,10 @@ function renderBanner(
 
   shadow.innerHTML = `
     <style>${getBannerStyles(config)}</style>
+    <div class="cmp-overlay-bg"></div>
     <div class="consentos-banner" role="dialog" aria-label="${t.title}" aria-labelledby="${titleId}" aria-describedby="${descId}" aria-modal="true">
       <div class="consentos-banner__content">
+        ${renderLogo(config)}
         <div class="consentos-banner__text">
           <p class="consentos-banner__title" id="${titleId}">${t.title}</p>
           <p class="consentos-banner__description" id="${descId}">
@@ -737,6 +739,35 @@ function handleConsent(
 }
 
 /**
+ * Render the optional banner logo. Returns an empty string unless the
+ * site config both enables the logo and provides a URL. The URL is
+ * HTML-attribute-escaped because it originates from user-supplied config.
+ *
+ * Exported for unit testing only.
+ */
+export function renderLogo(config: SiteConfig): string {
+  const banner = config.banner_config;
+  if (!banner?.showLogo || !banner.logoUrl) {
+    return '';
+  }
+  const safeUrl = banner.logoUrl
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const height = clampLogoHeight(banner.logoHeight);
+  return `<img src="${safeUrl}" alt="" class="cmp-logo" style="height:${height}px" />`;
+}
+
+/** Clamp the configured logo height to a sane pixel range. Defaults to 28. */
+function clampLogoHeight(height: number | undefined): number {
+  if (typeof height !== 'number' || !Number.isFinite(height)) {
+    return 28;
+  }
+  return Math.min(120, Math.max(12, Math.round(height)));
+}
+
+/**
  * Render the banner description with template variables and markdown links.
  *
  * Replaces `{{privacy_policy}}` and `{{terms}}` with their URLs from config,
@@ -951,12 +982,13 @@ function getPositionCss(bc: BannerConfig | null): string {
   const mode = bc?.displayMode ?? 'bottom_banner';
   const radius = bc?.borderRadius ?? 6;
   const cornerPos = bc?.cornerPosition ?? 'right';
+  const width = clampBannerWidth(bc?.bannerWidth);
 
   switch (mode) {
     case 'top_banner':
       return 'position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;';
     case 'overlay':
-      return `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483647; width: 90%; max-width: 600px; border-radius: ${radius}px;`;
+      return `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483647; width: 90%; max-width: ${width}px; border-radius: ${radius}px;`;
     case 'corner_popup': {
       const side = cornerPos === 'left' ? 'left: 20px;' : 'right: 20px;';
       return `position: fixed; bottom: 20px; ${side} z-index: 2147483647; width: 380px; max-width: calc(100% - 40px); border-radius: ${radius}px;`;
@@ -965,6 +997,14 @@ function getPositionCss(bc: BannerConfig | null): string {
     default:
       return 'position: fixed; bottom: 0; left: 0; right: 0; z-index: 2147483647;';
   }
+}
+
+/** Clamp the configured banner width to a sane pixel range. Defaults to 600. */
+function clampBannerWidth(width: number | undefined): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) {
+    return 600;
+  }
+  return Math.min(960, Math.max(280, Math.round(width)));
 }
 
 /** Resolve per-button inline style from ButtonConfig. */
@@ -991,8 +1031,8 @@ function getButtonCss(
   return `background: ${bg}; color: ${color}; border: ${border}; border-radius: ${radius}px;`;
 }
 
-/** Banner CSS — isolated inside Shadow DOM. */
-function getBannerStyles(config: SiteConfig): string {
+/** Banner CSS — isolated inside Shadow DOM. Exported for unit testing only. */
+export function getBannerStyles(config: SiteConfig): string {
   const bc = config.banner_config;
   const bg = bc?.backgroundColour ?? '#ffffff';
   const text = bc?.textColour ?? '#0E1929';        // ConsentOS Ink
@@ -1007,6 +1047,14 @@ function getBannerStyles(config: SiteConfig): string {
 
   return `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    .cmp-overlay-bg {
+      display: ${mode === 'overlay' && bc?.showOverlayBackdrop !== false ? 'block' : 'none'};
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 2147483646;
+    }
 
     .consentos-banner {
       ${getPositionCss(bc)}
@@ -1024,6 +1072,13 @@ function getBannerStyles(config: SiteConfig): string {
       max-width: 1200px;
       margin: 0 auto;
       padding: 20px 24px;
+    }
+
+    .cmp-logo {
+      width: auto;
+      max-width: 100%;
+      margin-bottom: 10px;
+      display: block;
     }
 
     .consentos-banner__title {

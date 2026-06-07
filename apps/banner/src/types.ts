@@ -149,15 +149,27 @@ export interface BannerTextConfig {
 export interface BannerConfig {
   displayMode?: 'bottom_banner' | 'top_banner' | 'overlay' | 'corner_popup';
   cornerPosition?: 'left' | 'right';
+  /**
+   * Whether the dimming backdrop is shown behind the overlay (modal) banner.
+   * Only applies to the overlay display mode. Defaults to true; set to false
+   * to leave the page interactive behind an informational overlay.
+   */
+  showOverlayBackdrop?: boolean;
   primaryColour?: string;
   backgroundColour?: string;
   textColour?: string;
-  buttonStyle?: 'filled' | 'outline';
   fontFamily?: string;
   customFontUrl?: string;
   borderRadius?: number;
+  /**
+   * Preferred banner width in pixels for the overlay (modal) display mode.
+   * Other modes use their own fixed/full-width layout. Defaults to 600.
+   */
+  bannerWidth?: number;
   showLogo?: boolean;
   logoUrl?: string;
+  /** Logo height in pixels (width scales automatically). Defaults to 28. */
+  logoHeight?: number;
   showRejectAll?: boolean;
   showManagePreferences?: boolean;
   showCloseButton?: boolean;

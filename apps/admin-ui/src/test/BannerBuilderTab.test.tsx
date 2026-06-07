@@ -28,6 +28,14 @@ const DEFAULT_PROPS = {
   onSave: mockOnSave,
 };
 
+/**
+ * The sidebar is a single-open accordion with only "Display mode" expanded by
+ * default. Click a section header to reveal its controls before asserting.
+ */
+function expandSection(name: string) {
+  fireEvent.click(screen.getByText(name));
+}
+
 describe('BannerBuilderTab', () => {
   it('renders the builder with default state', () => {
     renderWithProviders(
@@ -84,14 +92,24 @@ describe('BannerBuilderTab', () => {
     expect(iframe).toHaveStyle({ width: '375px' });
   });
 
-  it('renders layout toggle checkboxes', () => {
+  it('renders button visibility toggles in the Buttons section', () => {
     renderWithProviders(
       <BannerBuilderTab {...DEFAULT_PROPS} />,
     );
+    expandSection('Buttons');
 
-    expect(screen.getByText("Show 'Reject all' button")).toBeInTheDocument();
-    expect(screen.getByText("Show 'Manage preferences'")).toBeInTheDocument();
+    // Reject/Manage toggles now live in each button card's header
+    expect(screen.getByLabelText('Show Reject button')).toBeInTheDocument();
+    expect(screen.getByLabelText('Show Manage preferences')).toBeInTheDocument();
     expect(screen.getByText('Show close button')).toBeInTheDocument();
+  });
+
+  it('renders non-button display toggles in the Layout section', () => {
+    renderWithProviders(
+      <BannerBuilderTab {...DEFAULT_PROPS} />,
+    );
+    expandSection('Layout');
+
     expect(screen.getByText('Show cookie count')).toBeInTheDocument();
     expect(screen.getByText('Show logo')).toBeInTheDocument();
   });
@@ -100,6 +118,7 @@ describe('BannerBuilderTab', () => {
     renderWithProviders(
       <BannerBuilderTab {...DEFAULT_PROPS} />,
     );
+    expandSection('Layout');
 
     // Logo is off by default — URL field should not be visible
     expect(screen.queryByPlaceholderText('https://example.com/logo.svg')).not.toBeInTheDocument();
@@ -111,21 +130,11 @@ describe('BannerBuilderTab', () => {
     expect(screen.getByPlaceholderText('https://example.com/logo.svg')).toBeInTheDocument();
   });
 
-  it('renders button style toggle', () => {
-    renderWithProviders(
-      <BannerBuilderTab {...DEFAULT_PROPS} />,
-    );
-
-    expect(screen.getByText('Default button style')).toBeInTheDocument();
-    // Multiple "Filled"/"Outline" buttons exist (default + per-button editors)
-    expect(screen.getAllByText('Filled').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('Outline').length).toBeGreaterThanOrEqual(1);
-  });
-
   it('renders font selector', () => {
     renderWithProviders(
       <BannerBuilderTab {...DEFAULT_PROPS} />,
     );
+    expandSection('Theme');
 
     expect(screen.getByText('Font')).toBeInTheDocument();
     expect(screen.getByText('System default')).toBeInTheDocument();
@@ -146,7 +155,6 @@ describe('BannerBuilderTab', () => {
         primaryColour: '#ff0000',
         backgroundColour: '#000000',
         textColour: '#ffffff',
-        buttonStyle: 'outline' as const,
         fontFamily: 'Georgia, serif',
         borderRadius: 12,
         showRejectAll: false,
@@ -162,12 +170,14 @@ describe('BannerBuilderTab', () => {
       <BannerBuilderTab {...DEFAULT_PROPS} config={configWithBanner} />,
     );
 
-    // Check that the close button toggle is checked
+    // The close button toggle now lives in the Buttons section
+    expandSection('Buttons');
     const closeLabel = screen.getByText('Show close button').closest('label')!;
     const closeCheckbox = closeLabel.querySelector('input') as HTMLInputElement;
     expect(closeCheckbox.checked).toBe(true);
 
-    // Logo URL field should be visible since showLogo is true
+    // Logo URL field lives in Layout and should be visible since showLogo is true
+    expandSection('Layout');
     expect(screen.getByPlaceholderText('https://example.com/logo.svg')).toBeInTheDocument();
   });
 
