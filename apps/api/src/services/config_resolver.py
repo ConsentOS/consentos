@@ -51,6 +51,11 @@ SYSTEM_DEFAULTS: dict[str, Any] = {
     "privacy_policy_url": None,
     "terms_url": None,
     "consent_expiry_days": 365,
+    # ``scan_max_pages`` is now a nullable column on ``site_configs``
+    # (so the admin can "Reset to inherited") but it doesn't actually
+    # cascade through org/group — it's per-site. Carry a system-level
+    # fallback here so the editor never has to render a NULL value.
+    "scan_max_pages": 50,
     # All five categories visible by default; any cascade layer may
     # narrow this to a subset. The resolver normalises the result
     # via ``_normalise_enabled_categories``.

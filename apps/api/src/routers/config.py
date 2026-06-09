@@ -31,8 +31,15 @@ router = APIRouter(prefix="/config", tags=["config"])
 async def get_public_site_config(
     site_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-) -> SiteConfig:
-    """Public endpoint: retrieve site config for the banner script. No auth required."""
+) -> dict:
+    """Public endpoint: retrieve site config. No auth required.
+
+    Returned values are cascade-resolved (system / org / group / site)
+    so scalar fields are always concrete, even when the row has nulls
+    from an operator clearing an override. The banner script itself
+    uses ``/sites/{id}/geo-resolved`` for region-aware resolution; this
+    endpoint exists for tooling that just wants the effective shape.
+    """
     result = await db.execute(
         select(SiteConfig)
         .join(Site)
@@ -48,7 +55,44 @@ async def get_public_site_config(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site configuration not found",
         )
-    return config
+
+    org_id = await _get_site_org_id(site_id, db)
+    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
+    group_id = await _get_site_group_id(site_id, db)
+    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    resolved = resolve_config(
+        orm_to_config_dict(config),
+        org_defaults=org_defaults,
+        group_defaults=group_defaults,
+    )
+
+    return {
+        "id": config.id,
+        "site_id": config.site_id,
+        "created_at": config.created_at,
+        "updated_at": config.updated_at,
+        "blocking_mode": resolved.get("blocking_mode"),
+        "regional_modes": resolved.get("regional_modes"),
+        "tcf_enabled": resolved.get("tcf_enabled"),
+        "tcf_publisher_cc": resolved.get("tcf_publisher_cc"),
+        "gpp_enabled": resolved.get("gpp_enabled"),
+        "gpp_supported_apis": resolved.get("gpp_supported_apis"),
+        "gpc_enabled": resolved.get("gpc_enabled"),
+        "gpc_jurisdictions": resolved.get("gpc_jurisdictions"),
+        "gpc_global_honour": resolved.get("gpc_global_honour"),
+        "gcm_enabled": resolved.get("gcm_enabled"),
+        "gcm_default": resolved.get("gcm_default"),
+        "shopify_privacy_enabled": resolved.get("shopify_privacy_enabled"),
+        "banner_config": resolved.get("banner_config"),
+        "privacy_policy_url": resolved.get("privacy_policy_url"),
+        "terms_url": resolved.get("terms_url"),
+        "scan_schedule_cron": resolved.get("scan_schedule_cron"),
+        "scan_max_pages": resolved.get("scan_max_pages"),
+        "consent_expiry_days": resolved.get("consent_expiry_days"),
+        "consent_retention_days": config.consent_retention_days,
+        "enabled_categories": resolved.get("enabled_categories"),
+        "disclosed_vendor_ids": resolved.get("disclosed_vendor_ids"),
+    }
 
 
 @router.get("/sites/{site_id}/resolved")

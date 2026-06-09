@@ -42,6 +42,11 @@ def _mock_config(**overrides):
     config.scan_schedule_cron = overrides.get("scan_schedule_cron")
     config.scan_max_pages = overrides.get("scan_max_pages", 50)
     config.consent_expiry_days = overrides.get("consent_expiry_days", 365)
+    config.consent_retention_days = overrides.get("consent_retention_days")
+    config.terms_url = overrides.get("terms_url")
+    config.shopify_privacy_enabled = overrides.get("shopify_privacy_enabled", False)
+    config.enabled_categories = overrides.get("enabled_categories")
+    config.disclosed_vendor_ids = overrides.get("disclosed_vendor_ids")
     config.created_at = datetime.now(UTC)
     config.updated_at = datetime.now(UTC)
     return config
@@ -86,7 +91,9 @@ class TestPublicSiteConfig:
     @pytest.mark.asyncio
     async def test_get_public_config(self, mock_app):
         config = _mock_config()
-        db = _mock_db_sequence(config)
+        # Endpoint now applies the cascade: config row, then org_id,
+        # org_config, group_id (all None for "no overrides").
+        db = _mock_db_sequence(config, ORG_ID, None, None)
         async with await _client(mock_app, db) as client:
             resp = await client.get(f"/api/v1/config/sites/{config.site_id}")
         assert resp.status_code == 200

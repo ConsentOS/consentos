@@ -59,8 +59,9 @@ def downgrade() -> None:
     for name, _, default in _COLUMNS:
         if default is not None:
             op.execute(
-                f"UPDATE site_configs SET {name} = '{default}' WHERE {name} IS NULL"  # noqa: S608
-                if isinstance(default, str) and not default.lstrip("-").isdigit()
+                f"UPDATE site_configs SET {name} = '{default}' WHERE {name} IS NULL"
+                if isinstance(default, str)
+                and not default.lstrip("-").isdigit()
                 and default not in ("true", "false")
                 else f"UPDATE site_configs SET {name} = {default} WHERE {name} IS NULL"
             )
