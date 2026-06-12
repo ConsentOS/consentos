@@ -81,3 +81,11 @@ class TestSecurityHeaders:
     async def test_api_endpoints_still_get_strict_csp(self, client):
         resp = await client.get("/health")
         assert resp.headers["content-security-policy"] == "default-src 'none'"
+
+    @pytest.mark.asyncio
+    async def test_hosted_page_gets_relaxed_csp(self, client):
+        resp = await client.get("/c/00000000-0000-0000-0000-000000000000/cookies")
+        csp = resp.headers["content-security-policy"]
+        assert "default-src 'none'" not in csp
+        assert "script-src 'self'" in csp
+        assert "style-src 'self' 'unsafe-inline'" in csp
