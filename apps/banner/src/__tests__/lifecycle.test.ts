@@ -96,6 +96,7 @@ import {
   initCrossTabSync,
   removeBanner,
   renderBanner,
+  showPreferencesButton,
 } from '../banner';
 import type { TranslationStrings } from '../i18n';
 import type { BannerConfig, SiteConfig } from '../types';
@@ -188,6 +189,35 @@ describe('banner-closed event', () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0].detail).toEqual({ reason });
+  });
+});
+
+describe('floating preferences button', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('mounts a host element with the conventional id', () => {
+    showPreferencesButton(makeConfig(), T);
+    expect(document.getElementById('cmp-preferences-button')).not.toBeNull();
+  });
+
+  it('replaces the existing host on re-invocation', () => {
+    showPreferencesButton(makeConfig(), T);
+    const first = document.getElementById('cmp-preferences-button');
+    showPreferencesButton(makeConfig(), T);
+    const second = document.getElementById('cmp-preferences-button');
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    expect(document.querySelectorAll('#cmp-preferences-button')).toHaveLength(1);
+  });
+
+  it('renders nothing when banner_config.show_preferences_button is false', () => {
+    const config = makeConfig({
+      banner_config: { show_preferences_button: false } as unknown as BannerConfig,
+    });
+    showPreferencesButton(config, T);
+    expect(document.getElementById('cmp-preferences-button')).toBeNull();
   });
 });
 
