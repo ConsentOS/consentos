@@ -291,3 +291,58 @@ class TestSiteConfig:
         url_info = inh.json()["fields"]["privacy_policy_url"]
         assert url_info["site_value"] is None
         assert url_info["resolved_value"] is None
+
+
+@requires_db
+class TestPublicCookies:
+    async def test_returns_only_enabled_categories(self, db_client, auth_headers):
+        domain = f"cookies-{uuid.uuid4().hex[:8]}.com"
+        create_resp = await db_client.post(
+            "/api/v1/sites/",
+            json={"domain": domain, "display_name": "Cookies Test"},
+            headers=auth_headers,
+        )
+        site_id = create_resp.json()["id"]
+        await db_client.put(
+            f"/api/v1/sites/{site_id}/config",
+            json={
+                "blocking_mode": "opt_in",
+                "enabled_categories": ["necessary", "analytics"],
+            },
+            headers=auth_headers,
+        )
+
+        resp = await db_client.get(f"/api/v1/config/sites/{site_id}/cookies")
+        assert resp.status_code == 200
+        body = resp.json()
+        slugs = [c["slug"] for c in body["categories"]]
+        assert "necessary" in slugs
+        assert "analytics" in slugs
+        assert "marketing" not in slugs
+        assert "functional" not in slugs
+
+    async def test_returns_site_metadata(self, db_client, auth_headers):
+        domain = f"meta-{uuid.uuid4().hex[:8]}.com"
+        create_resp = await db_client.post(
+            "/api/v1/sites/",
+            json={"domain": domain, "display_name": "Meta Co"},
+            headers=auth_headers,
+        )
+        site_id = create_resp.json()["id"]
+        await db_client.put(
+            f"/api/v1/sites/{site_id}/config",
+            json={"blocking_mode": "opt_in", "consent_expiry_days": 180},
+            headers=auth_headers,
+        )
+
+        resp = await db_client.get(f"/api/v1/config/sites/{site_id}/cookies")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["site_name"] == "Meta Co"
+        assert body["domain"] == domain
+        assert body["consent_expiry_days"] == 180
+
+    async def test_returns_404_for_missing_site(self, db_client):
+        missing = uuid.uuid4()
+        resp = await db_client.get(f"/api/v1/config/sites/{missing}/cookies")
+        assert resp.status_code == 404

@@ -20,6 +20,7 @@ import { isImplicitConsentMode } from './blocking-mode';
 // for us to drive its proxies — see ``updateAcceptedCategories``
 // below and ``apps/banner/src/loader.ts``.
 import { buildConsentState, readConsent, writeConsent, writeTcfCookie } from './consent';
+import { renderCookiesWidget } from './cookies-widget';
 import { buildGcmStateFromCategories, updateGcm } from './gcm';
 import { type TranslationStrings, DEFAULT_TRANSLATIONS, detectLocale, interpolate, loadTranslations, renderLinks } from './i18n';
 import {
@@ -241,11 +242,6 @@ async function init(): Promise<void> {
     console.info(`[ConsentOS] A/B test assigned: variant "${abAssignment.variant.name}"`);
   }
 
-  // Install the real CMP public API now that we have the config
-  installCmpApi(config);
-
-  initCrossTabSync(config);
-
   // Check if existing consent needs re-consent. We still load
   // translations and install the floating button even when no banner
   // needs to show, so the visitor can re-open the preference centre
@@ -285,6 +281,14 @@ async function init(): Promise<void> {
   // Load translations
   const locale = detectLocale();
   const t = await loadTranslations(cdnBase, locale);
+
+  installCmpApi(config, t, gpcResult, abAssignment);
+
+  if (document.querySelector('[data-consentos-cookies]')) {
+    window.ConsentOS.renderCookies();
+  }
+
+  initCrossTabSync(config);
 
   // Capture a closure that re-opens the banner with current consent
   // pre-filled. Called from the floating button and from
@@ -371,7 +375,12 @@ async function init(): Promise<void> {
  * fully covers all categories, the banner is suppressed. If categories are
  * missing, only those categories need consent from the user.
  */
-function installCmpApi(config: SiteConfig): void {
+function installCmpApi(
+  config: SiteConfig,
+  t: TranslationStrings,
+  gpcResult?: GpcResult,
+  abAssignment?: ABAssignment | null,
+): void {
   const enabled = resolveEnabledCategories(config);
   const nonEssential = nonEssentialFor(enabled);
 
@@ -427,6 +436,20 @@ function installCmpApi(config: SiteConfig): void {
     },
     clearIdentity: (): void => {
       _hooks.clearIdentity();
+    },
+    renderCookies: async (target?: string | HTMLElement): Promise<void> => {
+      const { siteId, apiBase } = window.__consentos;
+      const current = (readConsent()?.accepted ?? ['necessary']) as CategorySlug[];
+      await renderCookiesWidget({
+        target,
+        apiBase,
+        siteId,
+        t,
+        currentAccepted: current,
+        onSave: (accepted, rejected) => {
+          handleConsent(accepted, rejected, config, gpcResult, abAssignment, t);
+        },
+      });
     },
   };
 }

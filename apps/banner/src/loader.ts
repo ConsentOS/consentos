@@ -64,6 +64,12 @@ declare global {
       identifyUser: (jwt: string) => Promise<string[]>;
       /** Clear the identified user session. */
       clearIdentity: () => void;
+      /**
+       * Render the cookies management widget into the given target.
+       * Defaults to ``[data-consentos-cookies]``. Used on a site's
+       * own cookies / privacy page in place of the hosted page.
+       */
+      renderCookies: (target?: string | HTMLElement) => Promise<void>;
     };
   }
 }
@@ -113,6 +119,7 @@ declare global {
     isCategoryAccepted: (cat: string) => ((readConsent()?.accepted ?? ['necessary']) as string[]).includes(cat),
     identifyUser: async () => { console.warn('[ConsentOS] identifyUser called before bundle loaded'); return []; },
     clearIdentity: _stub('clearIdentity'),
+    renderCookies: async () => { console.warn('[ConsentOS] renderCookies called before bundle loaded'); },
   };
 
   // Warn if essential attributes are missing

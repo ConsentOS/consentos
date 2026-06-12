@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.extensions.registry import get_registry
-from src.models.cookie import CookieAllowListEntry, CookieCategory
+from src.models.cookie import Cookie, CookieAllowListEntry, CookieCategory
 from src.models.iab_gvl import IabGvlMeta
 from src.models.org_config import OrgConfig
 from src.models.site import Site
@@ -217,6 +217,107 @@ async def get_geo_resolved_config(
     public["detected_region"] = geo.region
 
     return public
+
+
+@router.get("/sites/{site_id}/cookies")
+async def get_public_cookies(
+    site_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Public endpoint: cookies grouped by category for the embedded widget.
+
+    Returns the same shape the hosted-page template used to render server
+    side, as JSON. Categories are filtered to those the site has enabled
+    via the resolved cascade; cookies with no category fall under an
+    explicit ``uncategorised`` bucket so operators can spot them.
+    """
+    site_result = await db.execute(
+        select(Site).where(
+            Site.id == site_id,
+            Site.is_active.is_(True),
+            Site.deleted_at.is_(None),
+        )
+    )
+    site = site_result.scalar_one_or_none()
+    if site is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site not found",
+        )
+
+    config_result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
+    config = config_result.scalar_one_or_none()
+
+    org_id = await _get_site_org_id(site_id, db)
+    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
+    group_id = await _get_site_group_id(site_id, db)
+    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    resolved = resolve_config(
+        orm_to_config_dict(config) if config else {},
+        org_defaults=org_defaults,
+        group_defaults=group_defaults,
+    )
+    enabled_slugs = set(resolved.get("enabled_categories") or [])
+
+    cat_result = await db.execute(select(CookieCategory).order_by(CookieCategory.display_order))
+    all_categories = list(cat_result.scalars().all())
+
+    cookie_result = await db.execute(
+        select(Cookie).where(Cookie.site_id == site_id).order_by(Cookie.name)
+    )
+    cookies = list(cookie_result.scalars().all())
+
+    by_cat_id: dict[uuid.UUID, list[Cookie]] = {}
+    uncategorised: list[Cookie] = []
+    for cookie in cookies:
+        if cookie.category_id:
+            by_cat_id.setdefault(cookie.category_id, []).append(cookie)
+        else:
+            uncategorised.append(cookie)
+
+    categories_out = []
+    for cat in all_categories:
+        if cat.slug not in enabled_slugs:
+            continue
+        categories_out.append(
+            {
+                "slug": cat.slug,
+                "name": cat.name,
+                "description": cat.description or "",
+                "locked": cat.is_essential,
+                "cookies": [_cookie_to_dict(c) for c in by_cat_id.get(cat.id, [])],
+            }
+        )
+
+    if uncategorised:
+        categories_out.append(
+            {
+                "slug": "uncategorised",
+                "name": "Uncategorised",
+                "description": ("Cookies that have not yet been assigned to a category."),
+                "locked": False,
+                "cookies": [_cookie_to_dict(c) for c in uncategorised],
+            }
+        )
+
+    return {
+        "site_id": str(site_id),
+        "site_name": site.display_name or site.domain,
+        "domain": site.domain,
+        "privacy_policy_url": resolved.get("privacy_policy_url"),
+        "consent_expiry_days": resolved.get("consent_expiry_days") or 365,
+        "categories": categories_out,
+    }
+
+
+def _cookie_to_dict(cookie: Cookie) -> dict:
+    return {
+        "name": cookie.name,
+        "domain": cookie.domain,
+        "type": cookie.storage_type,
+        "description": cookie.description or "",
+        "vendor": cookie.vendor or "",
+    }
 
 
 @router.get("/geo")
