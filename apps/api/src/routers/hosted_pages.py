@@ -22,7 +22,6 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config.settings import get_settings
 from src.db import get_db
 from src.models.site import Site
 
@@ -45,12 +44,11 @@ async def hosted_cookies_page(
 
     site_name = site.display_name or site.domain
     api_base = str(request.base_url).rstrip("/")
-    cdn_base = get_settings().cdn_base_url.rstrip("/")
 
-    return _render_stub(site_id=site_id, site_name=site_name, api_base=api_base, cdn_base=cdn_base)
+    return _render_stub(site_id=site_id, site_name=site_name, api_base=api_base)
 
 
-def _render_stub(*, site_id: uuid.UUID, site_name: str, api_base: str, cdn_base: str) -> str:
+def _render_stub(*, site_id: uuid.UUID, site_name: str, api_base: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,10 +68,9 @@ def _render_stub(*, site_id: uuid.UUID, site_name: str, api_base: str, cdn_base:
         footer a {{ color: inherit; }}
     </style>
     <script
-        src="{_esc(cdn_base)}/consent-loader.js"
+        src="/consent-loader.js"
         data-site-id="{site_id}"
         data-api-base="{_esc(api_base)}"
-        data-cdn-base="{_esc(cdn_base)}"
         async></script>
 </head>
 <body>
