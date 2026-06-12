@@ -306,9 +306,11 @@ async function init(): Promise<void> {
   };
 
   if (existingConsent && !reconsentRequired) {
-    // Banner isn't shown. Consent management happens on the hosted
-    // cookies page (/c/<site-id>/cookies) — site owners link to it
-    // from their footer. No floating button needed.
+    // Returning visitor: the banner stays hidden, but the floating
+    // preferences button is mounted so withdrawal is "as easy as
+    // giving consent" per GDPR Art. 7(3). Operators can suppress it
+    // with ``banner_config.show_preferences_button: false``.
+    showPreferencesButton(config, t);
     return;
   }
 
@@ -577,6 +579,7 @@ export function renderBanner(
   const cleanupEscape = onEscape(banner, () => {
     handleConsent(dismissAccepted, dismissRejected, config, gpcResult, abAssignment, t);
     removeBanner(host, 'dismissed', cleanupFocusTrap, cleanupEscape);
+    showPreferencesButton(config, t);
   });
 
   shadow.querySelectorAll('[data-action]').forEach((btn) => {
@@ -587,9 +590,11 @@ export function renderBanner(
         // "All" only includes the categories the operator has enabled.
         handleConsent([...enabledCategories], [], config, gpcResult, abAssignment, t);
         removeBanner(host, 'accept-all', cleanupFocusTrap, cleanupEscape);
+        showPreferencesButton(config, t);
       } else if (action === 'reject') {
         handleConsent(['necessary'], nonEssential, config, gpcResult, abAssignment, t);
         removeBanner(host, 'reject-all', cleanupFocusTrap, cleanupEscape);
+        showPreferencesButton(config, t);
       } else if (action === 'settings') {
         const isHidden = categoriesDiv.style.display === 'none';
         categoriesDiv.style.display = isHidden ? 'block' : 'none';
@@ -600,6 +605,7 @@ export function renderBanner(
         const rejected = nonEssential.filter((c) => !accepted.includes(c));
         handleConsent(accepted, rejected, config, gpcResult, abAssignment, t);
         removeBanner(host, 'save-preferences', cleanupFocusTrap, cleanupEscape);
+        showPreferencesButton(config, t);
       }
     });
   });
@@ -1038,7 +1044,7 @@ function removePreferencesButton(): void {
  * as giving it. Positioned opposite the banner's corner by default
  * so it doesn't sit behind the initial banner if displayed together.
  */
-function showPreferencesButton(config: SiteConfig, t: TranslationStrings): void {
+export function showPreferencesButton(config: SiteConfig, t: TranslationStrings): void {
   removePreferencesButton();
 
   // Honour the site's opt-out: operators can disable the floating
