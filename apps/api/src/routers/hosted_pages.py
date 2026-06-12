@@ -78,7 +78,7 @@ def _render_stub(*, site_id: uuid.UUID, site_name: str, api_base: str) -> str:
         <div data-consentos-cookies></div>
     </main>
     <footer>
-        Powered by <a href="https://consentos.dev">ConsentOS</a>
+        Powered by <a href="https://www.consentos.dev">ConsentOS</a>
     </footer>
 </body>
 </html>"""
