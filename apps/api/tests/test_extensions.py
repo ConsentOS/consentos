@@ -83,7 +83,7 @@ class TestExtensionRegistry:
         reg.apply(app)
 
         # The router should be included in the app routes
-        paths = [r.path for r in app.routes]
+        paths = list(app.openapi()["paths"])
         assert "/ext/test" in paths
 
     def test_apply_adds_openapi_tags(self):

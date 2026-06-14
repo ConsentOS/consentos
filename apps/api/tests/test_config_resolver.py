@@ -243,15 +243,15 @@ class TestBuildPublicConfig:
 
 class TestConfigRoutes:
     def test_resolved_config_route_registered(self, app):
-        routes = [r.path for r in app.routes]
+        routes = list(app.openapi()["paths"])
         assert "/api/v1/config/sites/{site_id}/resolved" in routes
 
     def test_publish_route_registered(self, app):
-        routes = [r.path for r in app.routes]
+        routes = list(app.openapi()["paths"])
         assert "/api/v1/config/sites/{site_id}/publish" in routes
 
     def test_inheritance_route_registered(self, app):
-        routes = [r.path for r in app.routes]
+        routes = list(app.openapi()["paths"])
         assert "/api/v1/config/sites/{site_id}/inheritance" in routes
 
     @pytest.mark.asyncio

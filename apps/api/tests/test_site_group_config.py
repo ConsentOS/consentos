@@ -11,11 +11,11 @@ class TestSiteGroupConfigRoutes:
     """Unit tests — no database required."""
 
     def test_group_config_get_route_registered(self, app):
-        routes = [r.path for r in app.routes]
+        routes = list(app.openapi()["paths"])
         assert "/api/v1/site-groups/{group_id}/config" in routes
 
     def test_group_config_put_route_registered(self, app):
-        routes = [r.path for r in app.routes]
+        routes = list(app.openapi()["paths"])
         assert "/api/v1/site-groups/{group_id}/config" in routes
 
     @pytest.mark.asyncio

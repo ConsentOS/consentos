@@ -151,7 +151,7 @@ class TestCookieResponse:
 class TestCookieCategoryRoutes:
     def test_categories_route_registered(self, app):
         """Verify the categories routes are registered in the app."""
-        routes = [r.path for r in app.routes]
+        routes = list(app.openapi()["paths"])
         assert "/api/v1/cookies/categories" in routes
         assert "/api/v1/cookies/categories/{category_id}" in routes
 
