@@ -5,7 +5,7 @@ description = "ConsentOS — API service"
 license = "Elastic-2.0"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115,<1",
+    "fastapi>=0.137,<0.138",
     "uvicorn[standard]>=0.34,<1",
     "sqlalchemy[asyncio]>=2.0,<3",
     "asyncpg>=0.30,<1",
