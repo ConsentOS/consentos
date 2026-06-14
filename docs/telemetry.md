@@ -133,18 +133,9 @@ api:
 
 ## Endpoint and transport
 
-By default the heartbeat is POSTed to:
-
-```
-https://telemetry.consentos.dev/v1/heartbeat
-```
-
-Override with `TELEMETRY_ENDPOINT=<url>` to point at your own
-collector. Network failures are logged and swallowed — telemetry
-must never break the worker.
-
-The send timeout is 10 seconds by default; tune with
-`TELEMETRY_TIMEOUT_SECONDS`.
+The heartbeat is POSTed to `https://telemetry.consentos.dev/v1/heartbeat`.
+Network failures are logged and swallowed — telemetry must never break
+the worker.
 
 ## Schedule
 

@@ -16,7 +16,8 @@ async def test_openapi_schema(client):
     assert response.status_code == 200
     schema = response.json()
     assert schema["info"]["title"] == "ConsentOS API"
-    assert schema["info"]["version"] == "0.1.0"
+    # Version is injected at build time; source/test builds use the sentinel.
+    assert schema["info"]["version"] == "0.0.0-dev"
 
 
 @pytest.mark.asyncio

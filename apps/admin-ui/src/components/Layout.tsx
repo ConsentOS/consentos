@@ -1,8 +1,11 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 
+import { getVersionInfo } from '../api/system';
 import { useAuthStore } from '../stores/auth';
 import { getNavItems } from '../extensions/registry';
+import UpdateBanner from './UpdateBanner';
 
 const CORE_NAV_ITEMS = [
   { path: '/sites', label: 'Sites', order: 10 },
@@ -17,6 +20,15 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Version + "update available" notice. Refetched hourly; failures are
+  // silent (the query just has no data and nothing renders).
+  const { data: versionInfo } = useQuery({
+    queryKey: ['system', 'version'],
+    queryFn: getVersionInfo,
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
 
   // Close user menu on outside click
   useEffect(() => {
@@ -174,12 +186,34 @@ export default function Layout() {
         )}
       </header>
 
+      {versionInfo && <UpdateBanner info={versionInfo} />}
+
       {/* Main content */}
       <main className="w-full px-6 py-10 md:px-12">
         <div className="mx-auto max-w-7xl">
           <Outlet />
         </div>
       </main>
+
+      {/* Footer: running version + update badge */}
+      {versionInfo && (
+        <footer className="border-t border-border-subtle px-6 py-4 md:px-12">
+          <div className="mx-auto flex max-w-7xl items-center gap-2 text-xs text-text-tertiary">
+            <span>ConsentOS {versionInfo.current}</span>
+            {versionInfo.update_available && (
+              <a
+                href="https://github.com/ConsentOS/consentos/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-full bg-copper/15 px-2 py-0.5 font-medium text-copper hover:bg-copper/25"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-copper" />
+                Update available
+              </a>
+            )}
+          </div>
+        </footer>
+      )}
     </div>
   );
 }
