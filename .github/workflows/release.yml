@@ -71,12 +71,23 @@ jobs:
           toTag: ${{ steps.semver.outputs.current }}
           writeToFile: true
 
-      - name: Commit CHANGELOG.md
+      - name: Bump version in source files
+        env:
+          VERSION: ${{ steps.semver.outputs.nextStrict }}
+        run: |
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" \
+            apps/api/pyproject.toml apps/scanner/pyproject.toml
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" \
+            apps/admin-ui/package.json apps/banner/package.json
+          sed -i "s/^version: .*/version: $VERSION/;s/^appVersion: .*/appVersion: \"$VERSION\"/" \
+            helm/consentos/Chart.yaml
+
+      - name: Commit version bump and changelog
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           branch: master
-          commit_message: "docs: update CHANGELOG.md for ${{ steps.semver.outputs.next }} [skip ci]"
-          file_pattern: CHANGELOG.md
+          commit_message: "chore(release): ${{ steps.semver.outputs.next }} [skip ci]"
+          file_pattern: "CHANGELOG.md apps/api/pyproject.toml apps/scanner/pyproject.toml apps/admin-ui/package.json apps/banner/package.json helm/consentos/Chart.yaml"
 
   # ── Build and push container images ──────────────────────────────
   build-api:
@@ -109,6 +120,8 @@ jobs:
           context: apps/api
           file: apps/api/Dockerfile
           push: true
+          build-args: |
+            APP_VERSION=${{ needs.version.outputs.newStrict }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 

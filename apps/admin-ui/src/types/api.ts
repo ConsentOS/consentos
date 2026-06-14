@@ -772,3 +772,9 @@ export interface PaginatedResponse<T> {
   page: number;
   page_size: number;
 }
+
+export interface VersionInfo {
+  current: string;
+  latest: string | null;
+  update_available: boolean;
+}

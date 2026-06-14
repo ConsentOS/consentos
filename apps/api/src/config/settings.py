@@ -19,10 +19,16 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = "ConsentOS API"
-    app_version: str = "0.1.0"
+    # Injected at build time via the APP_VERSION env var (release workflow
+    # build-arg); stays at the dev sentinel for local / source builds.
+    app_version: str = "0.0.0-dev"
     debug: bool = False
     environment: str = "development"
     log_level: str = "INFO"
+
+    # Update check — powers the admin "new release available" notice.
+    update_check_repo: str = "ConsentOS/consentos"
+    update_check_timeout_seconds: int = 10
 
     # Server
     host: str = "0.0.0.0"

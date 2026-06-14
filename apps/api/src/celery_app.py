@@ -63,6 +63,10 @@ app.conf.beat_schedule = {
         "task": "src.tasks.iab_gvl.refresh_gvl",
         "schedule": crontab(hour="3", minute="15"),  # Daily at 03:15 UTC
     },
+    "update-check-refresh": {
+        "task": "src.tasks.update_check.refresh_latest_version",
+        "schedule": crontab(hour="3", minute="45"),  # Daily at 03:45 UTC
+    },
 }
 
 # ── Explicit task imports ───────────────────────────────────────────
@@ -71,7 +75,8 @@ app.conf.beat_schedule = {
 import src.tasks.iab_gvl  # noqa: E402
 import src.tasks.retention  # noqa: E402
 import src.tasks.scanner  # noqa: E402
-import src.tasks.telemetry  # noqa: E402, F401
+import src.tasks.telemetry  # noqa: E402
+import src.tasks.update_check  # noqa: E402, F401
 
 try:
     import ee.api.src.tasks.compliance_scanner

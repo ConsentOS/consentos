@@ -13,6 +13,11 @@ RUN pip install --no-cache-dir --prefix=/install .
 # ── Runtime stage ────────────────────────────────────────────────────
 FROM python:3.12-slim
 
+# Release version, passed by the release workflow; read at runtime via
+# settings.app_version. Defaults to the dev sentinel for source builds.
+ARG APP_VERSION=0.0.0-dev
+ENV APP_VERSION=${APP_VERSION}
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 curl \
     && rm -rf /var/lib/apt/lists/*

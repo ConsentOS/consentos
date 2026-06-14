@@ -25,6 +25,7 @@ from src.routers import (
     site_group_config,
     site_groups,
     sites,
+    system,
     translations,
     users,
 )
@@ -145,6 +146,7 @@ def create_app() -> FastAPI:
     app.include_router(iab_gvl.router, prefix=api_prefix)
     app.include_router(translations.router, prefix=api_prefix)
     app.include_router(translations.public_router, prefix=api_prefix)
+    app.include_router(system.router, prefix=api_prefix)
 
     # Cross-domain consent bridge (no api_prefix — served at /consent-bridge)
     app.include_router(consent_bridge.router)
