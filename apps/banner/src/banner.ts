@@ -1070,17 +1070,16 @@ function removePreferencesButton(): void {
 export function showPreferencesButton(config: SiteConfig, t: TranslationStrings): void {
   removePreferencesButton();
 
-  // Honour the site's opt-out: operators can disable the floating
-  // button via ``banner_config.show_preferences_button = false``.
   const bc = config.banner_config ?? null;
-  if (bc && (bc as Record<string, unknown>).show_preferences_button === false) {
+  // snake_case keys are the legacy form, read before this field had a UI.
+  const legacy = bc as Record<string, unknown> | null;
+  const enabled = bc?.showPreferencesButton ?? legacy?.show_preferences_button;
+  if (enabled === false) {
     return;
   }
 
-  const position =
-    (bc as Record<string, unknown> | null)?.preferences_button_position === 'left'
-      ? 'left: 20px;'
-      : 'right: 20px;';
+  const positionPref = bc?.preferencesButtonPosition ?? legacy?.preferences_button_position;
+  const position = positionPref === 'left' ? 'left: 20px;' : 'right: 20px;';
 
   const host = document.createElement('div');
   host.id = _PREFERENCES_BUTTON_ID;
@@ -1371,5 +1370,8 @@ export function getBannerStyles(config: SiteConfig): string {
   `;
 }
 
-// Auto-init on load
-init();
+// Guarded so importing the module without the loader (e.g. unit tests)
+// does not auto-run init.
+if (typeof window !== 'undefined' && window.__consentos) {
+  init();
+}

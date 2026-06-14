@@ -29,7 +29,9 @@ vi.mock('../gcm', () => ({
 
 import { isImplicitConsentMode } from '../blocking-mode';
 import { updateAcceptedCategories } from '../blocker';
+import { showPreferencesButton } from '../banner';
 import { buildConsentState, readConsent, writeConsent } from '../consent';
+import { DEFAULT_TRANSLATIONS } from '../i18n';
 import { buildGcmStateFromCategories, updateGcm } from '../gcm';
 import type { SiteConfig, CategorySlug } from '../types';
 
@@ -81,6 +83,44 @@ describe('banner', () => {
     const host = document.getElementById('consentos-banner-host');
     if (host) host.remove();
     vi.unstubAllGlobals();
+  });
+
+  describe('showPreferencesButton', () => {
+    const BUTTON_ID = 'cmp-preferences-button';
+
+    afterEach(() => {
+      document.getElementById(BUTTON_ID)?.remove();
+    });
+
+    const withBannerConfig = (banner_config: SiteConfig['banner_config']): SiteConfig => ({
+      ...defaultConfig,
+      banner_config,
+    });
+
+    it('renders the floating button by default', () => {
+      showPreferencesButton(withBannerConfig(null), DEFAULT_TRANSLATIONS);
+      expect(document.getElementById(BUTTON_ID)).not.toBeNull();
+    });
+
+    it('suppresses the button when showPreferencesButton is false', () => {
+      showPreferencesButton(withBannerConfig({ showPreferencesButton: false }), DEFAULT_TRANSLATIONS);
+      expect(document.getElementById(BUTTON_ID)).toBeNull();
+    });
+
+    it('honours the legacy snake_case opt-out', () => {
+      const legacy = { show_preferences_button: false } as unknown as SiteConfig['banner_config'];
+      showPreferencesButton(withBannerConfig(legacy), DEFAULT_TRANSLATIONS);
+      expect(document.getElementById(BUTTON_ID)).toBeNull();
+    });
+
+    it('positions the button on the left when configured', () => {
+      showPreferencesButton(
+        withBannerConfig({ preferencesButtonPosition: 'left' }),
+        DEFAULT_TRANSLATIONS,
+      );
+      const host = document.getElementById(BUTTON_ID);
+      expect(host?.shadowRoot?.innerHTML).toContain('left: 20px;');
+    });
   });
 
   describe('buildDefaultConfig', () => {

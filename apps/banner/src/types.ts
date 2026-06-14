@@ -180,6 +180,8 @@ export interface BannerConfig {
   showManagePreferences?: boolean;
   showCloseButton?: boolean;
   showCookieCount?: boolean;
+  showPreferencesButton?: boolean;
+  preferencesButtonPosition?: 'left' | 'right';
   acceptButton?: ButtonConfig;
   rejectButton?: ButtonConfig;
   manageButton?: ButtonConfig;

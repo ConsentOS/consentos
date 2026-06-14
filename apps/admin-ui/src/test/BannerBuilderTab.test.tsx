@@ -110,6 +110,54 @@ describe('BannerBuilderTab', () => {
     expect(screen.getByText('Show close button')).toBeInTheDocument();
   });
 
+  it('toggles the floating preferences button and its position into the saved config', async () => {
+    mockOnSave.mockClear();
+    renderWithProviders(<BannerBuilderTab {...DEFAULT_PROPS} />);
+    expandSection('Buttons');
+
+    const toggle = screen
+      .getByText('Show floating preferences button')
+      .closest('label')!
+      .querySelector('input') as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(screen.getByText('Preferences button position')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Left'));
+    fireEvent.click(screen.getByText('Save banner'));
+
+    await waitFor(() => {
+      expect(mockOnSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          banner_config: expect.objectContaining({
+            showPreferencesButton: true,
+            preferencesButtonPosition: 'left',
+          }),
+        }),
+      );
+    });
+  });
+
+  it('hides the position selector and omits position when the button is disabled', async () => {
+    mockOnSave.mockClear();
+    renderWithProviders(<BannerBuilderTab {...DEFAULT_PROPS} />);
+    expandSection('Buttons');
+
+    const toggle = screen
+      .getByText('Show floating preferences button')
+      .closest('label')!
+      .querySelector('input') as HTMLInputElement;
+    fireEvent.click(toggle);
+
+    expect(screen.queryByText('Preferences button position')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Save banner'));
+
+    await waitFor(() => {
+      const body = mockOnSave.mock.calls[0][0] as { banner_config: BannerConfig };
+      expect(body.banner_config.showPreferencesButton).toBe(false);
+      expect(body.banner_config.preferencesButtonPosition).toBeUndefined();
+    });
+  });
+
   it('renders non-button display toggles in the Layout section', () => {
     renderWithProviders(
       <BannerBuilderTab {...DEFAULT_PROPS} />,

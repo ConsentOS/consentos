@@ -65,6 +65,8 @@ interface Defaults {
   showRejectAll: boolean;
   showManagePreferences: boolean;
   showCloseButton: boolean;
+  showPreferencesButton: boolean;
+  preferencesButtonPosition: CornerPosition;
   showLogo: boolean;
   logoUrl: string;
   logoHeight: number;
@@ -89,6 +91,8 @@ function getDefaults(config: { banner_config: BannerConfig | null } | null): Def
     showRejectAll: bc?.showRejectAll ?? true,
     showManagePreferences: bc?.showManagePreferences ?? true,
     showCloseButton: bc?.showCloseButton ?? false,
+    showPreferencesButton: bc?.showPreferencesButton ?? true,
+    preferencesButtonPosition: bc?.preferencesButtonPosition ?? 'right',
     showLogo: bc?.showLogo ?? false,
     logoUrl: bc?.logoUrl ?? '',
     logoHeight: bc?.logoHeight ?? 28,
@@ -131,6 +135,10 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
   const [showRejectAll, setShowRejectAll] = useState(defaults.showRejectAll);
   const [showManagePreferences, setShowManagePreferences] = useState(defaults.showManagePreferences);
   const [showCloseButton, setShowCloseButton] = useState(defaults.showCloseButton);
+  const [showPreferencesButton, setShowPreferencesButton] = useState(defaults.showPreferencesButton);
+  const [preferencesButtonPosition, setPreferencesButtonPosition] = useState<CornerPosition>(
+    defaults.preferencesButtonPosition,
+  );
   const [showLogo, setShowLogo] = useState(defaults.showLogo);
   const [logoUrl, setLogoUrl] = useState(defaults.logoUrl);
   const [logoHeight, setLogoHeight] = useState(defaults.logoHeight);
@@ -177,6 +185,8 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
       showRejectAll,
       showManagePreferences,
       showCloseButton,
+      showPreferencesButton,
+      preferencesButtonPosition: showPreferencesButton ? preferencesButtonPosition : undefined,
       showLogo,
       logoUrl: logoUrl || undefined,
       logoHeight: showLogo ? logoHeight : undefined,
@@ -189,6 +199,7 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
     [
       primaryColour, backgroundColour, textColour, fontFamily,
       borderRadius, bannerWidth, showOverlayBackdrop, showRejectAll, showManagePreferences, showCloseButton,
+      showPreferencesButton, preferencesButtonPosition,
       showLogo, logoUrl, logoHeight, showCookieCount, cornerPosition,
       acceptButton, rejectButton, manageButton,
     ],
@@ -396,6 +407,39 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
                 defaults={{ backgroundColour: 'transparent', textColour, style: 'outline' }}
               />
               <ToggleField label="Show close button" checked={showCloseButton} onChange={setShowCloseButton} />
+              <ToggleField
+                label="Show floating preferences button"
+                checked={showPreferencesButton}
+                onChange={setShowPreferencesButton}
+              />
+              {showPreferencesButton ? (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">
+                    Preferences button position
+                  </label>
+                  <div className="flex gap-2">
+                    {(['left', 'right'] as const).map((pos) => (
+                      <button
+                        key={pos}
+                        onClick={() => setPreferencesButtonPosition(pos)}
+                        className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                          preferencesButtonPosition === pos
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-mist text-text-secondary hover:bg-mist/80'
+                        }`}
+                      >
+                        {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-text-secondary/70">
+                  Visitors will have no built-in way to reopen their choices. Provide your own
+                  link calling <code>window.ConsentOS.showPreferences()</code> so consent stays
+                  as easy to withdraw as to give.
+                </p>
+              )}
             </div>
         </AccordionSection>
 
