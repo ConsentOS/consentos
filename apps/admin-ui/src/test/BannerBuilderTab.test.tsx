@@ -11,7 +11,9 @@ vi.mock('../api/translations', () => ({
   ]),
 }));
 
-const mockOnSave = vi.fn(() => Promise.resolve({}));
+const mockOnSave = vi.fn<(body: { banner_config: BannerConfig }) => Promise<unknown>>(
+  () => Promise.resolve({}),
+);
 
 function createQueryClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -152,7 +154,7 @@ describe('BannerBuilderTab', () => {
     fireEvent.click(screen.getByText('Save banner'));
 
     await waitFor(() => {
-      const body = mockOnSave.mock.calls[0][0] as { banner_config: BannerConfig };
+      const body = mockOnSave.mock.calls[0][0];
       expect(body.banner_config.showPreferencesButton).toBe(false);
       expect(body.banner_config.preferencesButtonPosition).toBeUndefined();
     });
