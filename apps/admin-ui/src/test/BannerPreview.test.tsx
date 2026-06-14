@@ -8,7 +8,6 @@ const DEFAULT_CONFIG: BannerConfig = {
   primaryColour: '#2563eb',
   backgroundColour: '#ffffff',
   textColour: '#1a1a2e',
-  buttonStyle: 'filled',
   fontFamily: 'system-ui',
   borderRadius: 6,
   showRejectAll: true,
@@ -63,6 +62,31 @@ describe('BannerPreview', () => {
     expect(srcdoc).toContain('We use cookies');
     expect(srcdoc).toContain('Accept all');
     expect(srcdoc).toContain('Reject all');
+    expect(srcdoc).toContain('Manage preferences');
+  });
+
+  it('renders previewText translations and the locale lang attribute', () => {
+    render(
+      <BannerPreview
+        bannerConfig={DEFAULT_CONFIG}
+        displayMode="bottom_banner"
+        viewport="desktop"
+        privacyPolicyUrl={null}
+        previewLocale="de"
+        previewText={{
+          title: 'Wir verwenden Cookies',
+          acceptAll: 'Alle akzeptieren',
+          rejectAll: 'Alle ablehnen',
+        }}
+      />,
+    );
+
+    const srcdoc = (screen.getByTitle('Banner preview') as HTMLIFrameElement).getAttribute('srcdoc')!;
+    expect(srcdoc).toContain('lang="de"');
+    expect(srcdoc).toContain('Wir verwenden Cookies');
+    expect(srcdoc).toContain('Alle akzeptieren');
+    expect(srcdoc).toContain('Alle ablehnen');
+    // Keys not provided in previewText fall back to defaults
     expect(srcdoc).toContain('Manage preferences');
   });
 
@@ -240,6 +264,20 @@ describe('BannerPreview', () => {
     expect(srcdoc).toContain('width: 380px');
   });
 
+  it('applies a custom banner width to the overlay modal', () => {
+    render(
+      <BannerPreview
+        bannerConfig={{ ...DEFAULT_CONFIG, bannerWidth: 480 }}
+        displayMode="overlay"
+        viewport="desktop"
+        privacyPolicyUrl={null}
+      />,
+    );
+
+    const srcdoc = (screen.getByTitle('Banner preview') as HTMLIFrameElement).getAttribute('srcdoc')!;
+    expect(srcdoc).toContain('max-width: 480px');
+  });
+
   it('applies top banner positioning', () => {
     render(
       <BannerPreview
@@ -268,10 +306,10 @@ describe('BannerPreview', () => {
     expect(srcdoc).toContain('border-radius: 12px');
   });
 
-  it('applies outline button style', () => {
+  it('applies a per-button outline style', () => {
     render(
       <BannerPreview
-        bannerConfig={{ ...DEFAULT_CONFIG, buttonStyle: 'outline' }}
+        bannerConfig={{ ...DEFAULT_CONFIG, acceptButton: { style: 'outline' } }}
         displayMode="bottom_banner"
         viewport="desktop"
         privacyPolicyUrl={null}

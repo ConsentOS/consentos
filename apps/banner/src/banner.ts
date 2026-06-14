@@ -20,6 +20,7 @@ import { isImplicitConsentMode } from './blocking-mode';
 // for us to drive its proxies — see ``updateAcceptedCategories``
 // below and ``apps/banner/src/loader.ts``.
 import { buildConsentState, readConsent, writeConsent, writeTcfCookie } from './consent';
+import { renderCookiesWidget } from './cookies-widget';
 import { buildGcmStateFromCategories, updateGcm } from './gcm';
 import { type TranslationStrings, DEFAULT_TRANSLATIONS, detectLocale, interpolate, renderLinks, selectTranslations } from './i18n';
 import {
@@ -241,9 +242,6 @@ async function init(): Promise<void> {
     console.info(`[ConsentOS] A/B test assigned: variant "${abAssignment.variant.name}"`);
   }
 
-  // Install the real CMP public API now that we have the config
-  installCmpApi(config);
-
   // Check if existing consent needs re-consent. We still load
   // translations and install the floating button even when no banner
   // needs to show, so the visitor can re-open the preference centre
@@ -284,22 +282,39 @@ async function init(): Promise<void> {
   const locale = detectLocale();
   const t = selectTranslations(config.translations, locale);
 
+  installCmpApi(config, t, gpcResult, abAssignment);
+
+  if (document.querySelector('[data-consentos-cookies]')) {
+    window.ConsentOS.renderCookies();
+  }
+
+  initCrossTabSync(config);
+
   // Capture a closure that re-opens the banner with current consent
   // pre-filled. Called from the floating button and from
   // ``window.ConsentOS.showPreferences()``.
   _openPreferences = () => {
     removePreferencesButton();
     const current = readConsent();
-    renderBanner(config, t, gpcResult, abAssignment, {
-      prefillCategories: current?.accepted ?? null,
-      showCategoriesInitially: true,
-    });
+    renderBanner(
+      config,
+      t,
+      gpcResult,
+      abAssignment,
+      {
+        prefillCategories: current?.accepted ?? null,
+        showCategoriesInitially: true,
+      },
+      'sdk',
+    );
   };
 
   if (existingConsent && !reconsentRequired) {
-    // Banner isn't shown. Consent management happens on the hosted
-    // cookies page (/c/<site-id>/cookies) — site owners link to it
-    // from their footer. No floating button needed.
+    // Returning visitor: the banner stays hidden, but the floating
+    // preferences button is mounted so withdrawal is "as easy as
+    // giving consent" per GDPR Art. 7(3). Operators can suppress it
+    // with ``banner_config.show_preferences_button: false``.
+    showPreferencesButton(config, t);
     return;
   }
 
@@ -315,10 +330,17 @@ async function init(): Promise<void> {
     if (config.gcm_enabled) {
       updateGcm(buildGcmStateFromCategories(enabled));
     }
-    renderBanner(config, t, gpcResult, abAssignment, {
-      prefillCategories: enabled,
-      showCategoriesInitially: false,
-    });
+    renderBanner(
+      config,
+      t,
+      gpcResult,
+      abAssignment,
+      {
+        prefillCategories: enabled,
+        showCategoriesInitially: false,
+      },
+      'implicit',
+    );
     return;
   }
 
@@ -355,7 +377,12 @@ async function init(): Promise<void> {
  * fully covers all categories, the banner is suppressed. If categories are
  * missing, only those categories need consent from the user.
  */
-function installCmpApi(config: SiteConfig): void {
+function installCmpApi(
+  config: SiteConfig,
+  t: TranslationStrings,
+  gpcResult?: GpcResult,
+  abAssignment?: ABAssignment | null,
+): void {
   const enabled = resolveEnabledCategories(config);
   const nonEssential = nonEssentialFor(enabled);
 
@@ -412,6 +439,20 @@ function installCmpApi(config: SiteConfig): void {
     clearIdentity: (): void => {
       _hooks.clearIdentity();
     },
+    renderCookies: async (target?: string | HTMLElement): Promise<void> => {
+      const { siteId, apiBase } = window.__consentos;
+      const current = (readConsent()?.accepted ?? ['necessary']) as CategorySlug[];
+      await renderCookiesWidget({
+        target,
+        apiBase,
+        siteId,
+        t,
+        currentAccepted: current,
+        onSave: (accepted, rejected) => {
+          handleConsent(accepted, rejected, config, gpcResult, abAssignment, t);
+        },
+      });
+    },
   };
 }
 
@@ -450,13 +491,31 @@ interface OpenOptions {
   showCategoriesInitially: boolean;
 }
 
-/** Create a Shadow DOM host and render the banner inside it. */
-function renderBanner(
+/**
+ * Why the banner is appearing. Surfaced on
+ * ``consentos:banner-shown`` so site code can distinguish "the visitor
+ * is seeing this for the first time" from "they reopened it themselves".
+ */
+export type BannerShownTrigger = 'initial' | 'implicit' | 'sdk';
+
+/**
+ * What dismissed the banner. Surfaced on ``consentos:banner-closed`` so
+ * analytics can split deliberate decisions from abandonment.
+ */
+export type BannerClosedReason =
+  | 'accept-all'
+  | 'reject-all'
+  | 'save-preferences'
+  | 'dismissed';
+
+/** Create a Shadow DOM host and render the banner inside it. Exported for unit testing only. */
+export function renderBanner(
   config: SiteConfig,
   t: TranslationStrings,
   gpcResult?: GpcResult,
   abAssignment?: ABAssignment | null,
   openOptions?: OpenOptions,
+  trigger: BannerShownTrigger = 'initial',
 ): void {
   // Signal to TCF-aware vendors that the CMP UI is now visible. They
   // can poll ``ping`` for ``displayStatus`` to know when to retry
@@ -476,14 +535,17 @@ function renderBanner(
 
   shadow.innerHTML = `
     <style>${getBannerStyles(config)}</style>
+    <div class="cmp-overlay-bg"></div>
     <div class="consentos-banner" role="dialog" aria-label="${t.title}" aria-labelledby="${titleId}" aria-describedby="${descId}" aria-modal="true">
       <div class="consentos-banner__content">
+        ${renderLogo(config)}
         <div class="consentos-banner__text">
           <p class="consentos-banner__title" id="${titleId}">${t.title}</p>
           <p class="consentos-banner__description" id="${descId}">
             ${renderDescription(t.description, config)}
           </p>
         </div>
+        ${renderCookieCount(config, t)}
         <div class="consentos-banner__categories" id="consentos-categories" role="group" aria-label="${t.managePreferences}">
           ${renderCategories(t, enabledCategories)}
         </div>
@@ -539,7 +601,8 @@ function renderBanner(
 
   const cleanupEscape = onEscape(banner, () => {
     handleConsent(dismissAccepted, dismissRejected, config, gpcResult, abAssignment, t);
-    removeBanner(host, cleanupFocusTrap, cleanupEscape);
+    removeBanner(host, 'dismissed', cleanupFocusTrap, cleanupEscape);
+    showPreferencesButton(config, t);
   });
 
   shadow.querySelectorAll('[data-action]').forEach((btn) => {
@@ -549,10 +612,12 @@ function renderBanner(
         // Explicit Accept All overrides GPC — user choice takes precedence.
         // "All" only includes the categories the operator has enabled.
         handleConsent([...enabledCategories], [], config, gpcResult, abAssignment, t);
-        removeBanner(host, cleanupFocusTrap, cleanupEscape);
+        removeBanner(host, 'accept-all', cleanupFocusTrap, cleanupEscape);
+        showPreferencesButton(config, t);
       } else if (action === 'reject') {
         handleConsent(['necessary'], nonEssential, config, gpcResult, abAssignment, t);
-        removeBanner(host, cleanupFocusTrap, cleanupEscape);
+        removeBanner(host, 'reject-all', cleanupFocusTrap, cleanupEscape);
+        showPreferencesButton(config, t);
       } else if (action === 'settings') {
         const isHidden = categoriesDiv.style.display === 'none';
         categoriesDiv.style.display = isHidden ? 'block' : 'none';
@@ -562,7 +627,8 @@ function renderBanner(
         const accepted = getSelectedCategories(shadow);
         const rejected = nonEssential.filter((c) => !accepted.includes(c));
         handleConsent(accepted, rejected, config, gpcResult, abAssignment, t);
-        removeBanner(host, cleanupFocusTrap, cleanupEscape);
+        removeBanner(host, 'save-preferences', cleanupFocusTrap, cleanupEscape);
+        showPreferencesButton(config, t);
       }
     });
   });
@@ -571,6 +637,10 @@ function renderBanner(
 
   // Move focus into the banner for keyboard users
   focusFirst(banner);
+
+  document.dispatchEvent(
+    new CustomEvent('consentos:banner-shown', { detail: { trigger } }),
+  );
 }
 
 /** Render category toggles HTML. Only renders the categories the
@@ -727,6 +797,8 @@ function handleConsent(
     });
   }
 
+  broadcastConsentChange(accepted);
+
   // Bridge for the standalone ConsentOS GTM template — when the
   // template is loaded on the page it registers a global callback so
   // it can react to consent changes. Lives in its own repo.
@@ -734,6 +806,55 @@ function handleConsent(
     (window as any).__consentos_gtm_consent_update({ accepted });
   }
 
+}
+
+/**
+ * Render the optional banner logo. Returns an empty string unless the
+ * site config both enables the logo and provides a URL. The URL is
+ * HTML-attribute-escaped because it originates from user-supplied config.
+ *
+ * Exported for unit testing only.
+ */
+export function renderLogo(config: SiteConfig): string {
+  const banner = config.banner_config;
+  if (!banner?.showLogo || !banner.logoUrl) {
+    return '';
+  }
+  const safeUrl = banner.logoUrl
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const height = clampLogoHeight(banner.logoHeight);
+  return `<img src="${safeUrl}" alt="" class="cmp-logo" style="height:${height}px" />`;
+}
+
+/** Clamp the configured logo height to a sane pixel range. Defaults to 28. */
+function clampLogoHeight(height: number | undefined): number {
+  if (typeof height !== 'number' || !Number.isFinite(height)) {
+    return 28;
+  }
+  return Math.min(120, Math.max(12, Math.round(height)));
+}
+
+/**
+ * Render the optional "N cookies used on this site" line. Returns an empty
+ * string unless the banner enables it AND the resolved config carries a
+ * positive cookie count (the number of allow-listed cookies, supplied by
+ * the API). Older API responses omit the count, so nothing renders then.
+ *
+ * Exported for unit testing only.
+ */
+export function renderCookieCount(config: SiteConfig, t: TranslationStrings): string {
+  if (!config.banner_config?.showCookieCount) {
+    return '';
+  }
+  const count = config.cookie_count;
+  if (typeof count !== 'number' || !Number.isFinite(count) || count <= 0) {
+    return '';
+  }
+  const text = interpolate(t.cookieCount, { count: String(count) });
+  return `<span class="cmp-cookie-count">${text}</span>`;
 }
 
 /**
@@ -822,6 +943,79 @@ function dispatchConsentEvent(accepted: string[]): void {
       cmp_accepted_categories: accepted,
     });
   }
+  broadcastConsentChange(accepted);
+}
+
+// -- Cross-tab consent sync (BroadcastChannel) ------------------------------
+
+let _broadcastChannel: BroadcastChannel | null = null;
+let _tabId: string | null = null;
+
+interface BroadcastConsentMessage {
+  type: 'consentos:cross-tab-sync';
+  accepted: string[];
+  source: string;
+  siteId: string;
+}
+
+/**
+ * Subscribe this tab to consent changes broadcast from sister tabs of
+ * the same site. Remote updates dispatch ``consentos:consent-synced``
+ * rather than ``consentos:consent-change`` and skip the ``dataLayer``
+ * push, so analytics integrators don't see duplicate events.
+ */
+export function initCrossTabSync(config: SiteConfig): void {
+  if (typeof BroadcastChannel === 'undefined') return;
+  _tabId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  _broadcastChannel = new BroadcastChannel('consentos');
+  _broadcastChannel.addEventListener('message', (e: MessageEvent) => {
+    const msg = e.data as BroadcastConsentMessage | undefined;
+    if (!msg || msg.type !== 'consentos:cross-tab-sync') return;
+    if (msg.source === _tabId) return;
+    if (msg.siteId !== window.__consentos.siteId) return;
+    applyRemoteConsent(msg.accepted, config);
+  });
+}
+
+/** Post the new accepted set to other tabs of this site. Exported for unit testing only. */
+export function broadcastConsentChange(accepted: string[]): void {
+  if (!_broadcastChannel || !_tabId) return;
+  const message: BroadcastConsentMessage = {
+    type: 'consentos:cross-tab-sync',
+    accepted,
+    source: _tabId,
+    siteId: window.__consentos.siteId,
+  };
+  _broadcastChannel.postMessage(message);
+}
+
+/**
+ * Apply a consent change received from another tab. Skips the cookie
+ * write and API POST (the originating tab already did those) but
+ * mirrors the blocker, GCM, and SDK-visible state so the receiving
+ * tab reflects the new decision immediately.
+ *
+ * Exported for unit testing only.
+ */
+export function applyRemoteConsent(accepted: string[], config: SiteConfig): void {
+  const current = (readConsent()?.accepted ?? ['necessary']) as string[];
+  if (sameCategorySet(current, accepted)) return;
+  updateAcceptedCategories(accepted as CategorySlug[]);
+  if (config.gcm_enabled) {
+    updateGcm(buildGcmStateFromCategories(accepted));
+  }
+  document.dispatchEvent(
+    new CustomEvent('consentos:consent-synced', { detail: { accepted } }),
+  );
+}
+
+function sameCategorySet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setA = new Set(a);
+  return b.every((x) => setA.has(x));
 }
 
 /** Determine the consent action string. */
@@ -834,11 +1028,15 @@ function determineAction(
   return 'custom';
 }
 
-/** Remove the banner from the DOM. */
-function removeBanner(
+/** Remove the banner from the DOM. Exported for unit testing only. */
+export function removeBanner(
   host: HTMLElement,
+  reason: BannerClosedReason,
   ...cleanups: Array<() => void>
 ): void {
+  document.dispatchEvent(
+    new CustomEvent('consentos:banner-closed', { detail: { reason } }),
+  );
   cleanups.forEach((fn) => fn());
   const useMotion = !prefersReducedMotion();
   if (useMotion) {
@@ -869,20 +1067,19 @@ function removePreferencesButton(): void {
  * as giving it. Positioned opposite the banner's corner by default
  * so it doesn't sit behind the initial banner if displayed together.
  */
-function showPreferencesButton(config: SiteConfig, t: TranslationStrings): void {
+export function showPreferencesButton(config: SiteConfig, t: TranslationStrings): void {
   removePreferencesButton();
 
-  // Honour the site's opt-out: operators can disable the floating
-  // button via ``banner_config.show_preferences_button = false``.
   const bc = config.banner_config ?? null;
-  if (bc && (bc as Record<string, unknown>).show_preferences_button === false) {
+  // snake_case keys are the legacy form, read before this field had a UI.
+  const legacy = bc as Record<string, unknown> | null;
+  const enabled = bc?.showPreferencesButton ?? legacy?.show_preferences_button;
+  if (enabled === false) {
     return;
   }
 
-  const position =
-    (bc as Record<string, unknown> | null)?.preferences_button_position === 'left'
-      ? 'left: 20px;'
-      : 'right: 20px;';
+  const positionPref = bc?.preferencesButtonPosition ?? legacy?.preferences_button_position;
+  const position = positionPref === 'left' ? 'left: 20px;' : 'right: 20px;';
 
   const host = document.createElement('div');
   host.id = _PREFERENCES_BUTTON_ID;
@@ -951,12 +1148,13 @@ function getPositionCss(bc: BannerConfig | null): string {
   const mode = bc?.displayMode ?? 'bottom_banner';
   const radius = bc?.borderRadius ?? 6;
   const cornerPos = bc?.cornerPosition ?? 'right';
+  const width = clampBannerWidth(bc?.bannerWidth);
 
   switch (mode) {
     case 'top_banner':
       return 'position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;';
     case 'overlay':
-      return `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483647; width: 90%; max-width: 600px; border-radius: ${radius}px;`;
+      return `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483647; width: 90%; max-width: ${width}px; border-radius: ${radius}px;`;
     case 'corner_popup': {
       const side = cornerPos === 'left' ? 'left: 20px;' : 'right: 20px;';
       return `position: fixed; bottom: 20px; ${side} z-index: 2147483647; width: 380px; max-width: calc(100% - 40px); border-radius: ${radius}px;`;
@@ -965,6 +1163,14 @@ function getPositionCss(bc: BannerConfig | null): string {
     default:
       return 'position: fixed; bottom: 0; left: 0; right: 0; z-index: 2147483647;';
   }
+}
+
+/** Clamp the configured banner width to a sane pixel range. Defaults to 600. */
+function clampBannerWidth(width: number | undefined): number {
+  if (typeof width !== 'number' || !Number.isFinite(width)) {
+    return 600;
+  }
+  return Math.min(960, Math.max(280, Math.round(width)));
 }
 
 /** Resolve per-button inline style from ButtonConfig. */
@@ -991,8 +1197,8 @@ function getButtonCss(
   return `background: ${bg}; color: ${color}; border: ${border}; border-radius: ${radius}px;`;
 }
 
-/** Banner CSS — isolated inside Shadow DOM. */
-function getBannerStyles(config: SiteConfig): string {
+/** Banner CSS — isolated inside Shadow DOM. Exported for unit testing only. */
+export function getBannerStyles(config: SiteConfig): string {
   const bc = config.banner_config;
   const bg = bc?.backgroundColour ?? '#ffffff';
   const text = bc?.textColour ?? '#0E1929';        // ConsentOS Ink
@@ -1007,6 +1213,14 @@ function getBannerStyles(config: SiteConfig): string {
 
   return `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    .cmp-overlay-bg {
+      display: ${mode === 'overlay' && bc?.showOverlayBackdrop !== false ? 'block' : 'none'};
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 2147483646;
+    }
 
     .consentos-banner {
       ${getPositionCss(bc)}
@@ -1024,6 +1238,20 @@ function getBannerStyles(config: SiteConfig): string {
       max-width: 1200px;
       margin: 0 auto;
       padding: 20px 24px;
+    }
+
+    .cmp-logo {
+      width: auto;
+      max-width: 100%;
+      margin-bottom: 10px;
+      display: block;
+    }
+
+    .cmp-cookie-count {
+      display: block;
+      font-size: 12px;
+      opacity: 0.6;
+      margin-bottom: 12px;
     }
 
     .consentos-banner__title {
@@ -1142,5 +1370,8 @@ function getBannerStyles(config: SiteConfig): string {
   `;
 }
 
-// Auto-init on load
-init();
+// Guarded so importing the module without the loader (e.g. unit tests)
+// does not auto-run init.
+if (typeof window !== 'undefined' && window.__consentos) {
+  init();
+}

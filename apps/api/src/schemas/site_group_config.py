@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.schemas.site import BlockingMode
+from src.schemas.validators import coerce_blank_to_none
 
 
 class SiteGroupConfigUpdate(BaseModel):
@@ -38,6 +39,15 @@ class SiteGroupConfigUpdate(BaseModel):
         max_length=500,
         description="Shared bridge origin for cross-domain consent (e.g. https://cmp.consentos.dev).",
     )
+
+    _coerce_blank = field_validator(
+        "tcf_publisher_cc",
+        "privacy_policy_url",
+        "terms_url",
+        "scan_schedule_cron",
+        "consent_bridge_url",
+        mode="before",
+    )(coerce_blank_to_none)
 
 
 class SiteGroupConfigResponse(BaseModel):

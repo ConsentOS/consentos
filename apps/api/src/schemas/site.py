@@ -2,7 +2,9 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from src.schemas.validators import coerce_blank_to_none
 
 
 class BlockingMode(StrEnum):
@@ -97,8 +99,26 @@ class SiteConfigUpdate(BaseModel):
     enabled_categories: list[str] | None = None
     disclosed_vendor_ids: list[int] | None = None
 
+    _coerce_blank = field_validator(
+        "tcf_publisher_cc",
+        "privacy_policy_url",
+        "terms_url",
+        "scan_schedule_cron",
+        mode="before",
+    )(coerce_blank_to_none)
+
 
 class SiteConfigResponse(BaseModel):
+    """Site config as it should appear to the admin editor.
+
+    Scalar fields are returned with the cascade applied: a column NULL
+    on the row (because the operator reset it to inherit) is replaced
+    with the effective value from the group / org / system layer before
+    serialisation. The editor therefore always sees something concrete;
+    source attribution (which layer supplied each value) lives on the
+    sibling ``/inheritance`` endpoint.
+    """
+
     id: uuid.UUID
     site_id: uuid.UUID
     blocking_mode: str

@@ -1,6 +1,8 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { ChevronDown } from 'lucide-react';
 
+import { listTranslations } from '../api/translations';
 import { trackConfigChange } from '../services/analytics';
 import type { BannerConfig, ButtonConfig } from '../types/api';
 import { Button } from './ui/button.tsx';
@@ -39,20 +41,35 @@ interface Props {
   onSave: (body: { banner_config: BannerConfig }) => Promise<unknown>;
   /** Optional domain for the preview iframe */
   siteDomain?: string | null;
+  /** Site ID — when present, enables previewing the banner in configured languages. */
+  siteId?: string | null;
 }
+
+// Display names for the locale dropdown; falls back to the raw code.
+const LOCALE_NAMES: Record<string, string> = {
+  en: 'English', fr: 'French', de: 'German', es: 'Spanish', it: 'Italian',
+  nl: 'Dutch', pt: 'Portuguese', pl: 'Polish', sv: 'Swedish', da: 'Danish',
+  fi: 'Finnish', no: 'Norwegian', cs: 'Czech', ro: 'Romanian', hu: 'Hungarian',
+  bg: 'Bulgarian', hr: 'Croatian', sk: 'Slovak', sl: 'Slovenian', el: 'Greek',
+  ja: 'Japanese', ko: 'Korean', zh: 'Chinese', ar: 'Arabic',
+};
 
 interface Defaults {
   primaryColour: string;
   backgroundColour: string;
   textColour: string;
-  buttonStyle: 'filled' | 'outline';
   fontFamily: string;
   borderRadius: number;
+  bannerWidth: number;
+  showOverlayBackdrop: boolean;
   showRejectAll: boolean;
   showManagePreferences: boolean;
   showCloseButton: boolean;
+  showPreferencesButton: boolean;
+  preferencesButtonPosition: CornerPosition;
   showLogo: boolean;
   logoUrl: string;
+  logoHeight: number;
   showCookieCount: boolean;
   displayMode: DisplayMode;
   cornerPosition: CornerPosition;
@@ -67,14 +84,18 @@ function getDefaults(config: { banner_config: BannerConfig | null } | null): Def
     primaryColour: bc?.primaryColour ?? '#2563eb',
     backgroundColour: bc?.backgroundColour ?? '#ffffff',
     textColour: bc?.textColour ?? '#1a1a2e',
-    buttonStyle: bc?.buttonStyle ?? 'filled',
     fontFamily: bc?.fontFamily ?? 'system-ui',
     borderRadius: bc?.borderRadius ?? 6,
+    bannerWidth: bc?.bannerWidth ?? 600,
+    showOverlayBackdrop: bc?.showOverlayBackdrop ?? true,
     showRejectAll: bc?.showRejectAll ?? true,
     showManagePreferences: bc?.showManagePreferences ?? true,
     showCloseButton: bc?.showCloseButton ?? false,
+    showPreferencesButton: bc?.showPreferencesButton ?? true,
+    preferencesButtonPosition: bc?.preferencesButtonPosition ?? 'right',
     showLogo: bc?.showLogo ?? false,
     logoUrl: bc?.logoUrl ?? '',
+    logoHeight: bc?.logoHeight ?? 28,
     showCookieCount: bc?.showCookieCount ?? false,
     displayMode: (bc?.displayMode as DisplayMode) ?? 'bottom_banner',
     cornerPosition: (bc?.cornerPosition as CornerPosition) ?? 'right',
@@ -84,24 +105,43 @@ function getDefaults(config: { banner_config: BannerConfig | null } | null): Def
   };
 }
 
-export default function BannerBuilderTab({ configQueryKey, config, onSave, siteDomain }: Props) {
+export default function BannerBuilderTab({ configQueryKey, config, onSave, siteDomain, siteId }: Props) {
   const queryClient = useQueryClient();
   const defaults = useMemo(() => getDefaults(config), [config]);
+
+  // Configured languages for the live-preview language switcher.
+  const { data: translations } = useQuery({
+    queryKey: ['sites', siteId, 'translations'],
+    queryFn: () => listTranslations(siteId as string),
+    enabled: !!siteId,
+  });
+  // '' = default (banner's own text / English defaults).
+  const [previewLocale, setPreviewLocale] = useState('');
+  const previewText = useMemo(
+    () => translations?.find((t) => t.locale === previewLocale)?.strings,
+    [translations, previewLocale],
+  );
 
   // Theme state
   const [primaryColour, setPrimaryColour] = useState(defaults.primaryColour);
   const [backgroundColour, setBackgroundColour] = useState(defaults.backgroundColour);
   const [textColour, setTextColour] = useState(defaults.textColour);
-  const [buttonStyle, setButtonStyle] = useState(defaults.buttonStyle);
   const [fontFamily, setFontFamily] = useState(defaults.fontFamily);
   const [borderRadius, setBorderRadius] = useState(defaults.borderRadius);
+  const [bannerWidth, setBannerWidth] = useState(defaults.bannerWidth);
+  const [showOverlayBackdrop, setShowOverlayBackdrop] = useState(defaults.showOverlayBackdrop);
 
   // Layout state
   const [showRejectAll, setShowRejectAll] = useState(defaults.showRejectAll);
   const [showManagePreferences, setShowManagePreferences] = useState(defaults.showManagePreferences);
   const [showCloseButton, setShowCloseButton] = useState(defaults.showCloseButton);
+  const [showPreferencesButton, setShowPreferencesButton] = useState(defaults.showPreferencesButton);
+  const [preferencesButtonPosition, setPreferencesButtonPosition] = useState<CornerPosition>(
+    defaults.preferencesButtonPosition,
+  );
   const [showLogo, setShowLogo] = useState(defaults.showLogo);
   const [logoUrl, setLogoUrl] = useState(defaults.logoUrl);
+  const [logoHeight, setLogoHeight] = useState(defaults.logoHeight);
   const [showCookieCount, setShowCookieCount] = useState(defaults.showCookieCount);
 
   // Display mode and viewport
@@ -115,6 +155,13 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
   const [manageButton, setManageButton] = useState<ButtonConfig>(defaults.manageButton);
 
   const [saved, setSaved] = useState(false);
+
+  // Accordion: which sidebar section is expanded (single-open). Display mode open by default.
+  const [openSection, setOpenSection] = useState<string | null>('display');
+  const toggleSection = useCallback(
+    (id: string) => setOpenSection((cur) => (cur === id ? null : id)),
+    [],
+  );
 
   const mutation = useMutation({
     mutationFn: (body: { banner_config: BannerConfig }) => onSave(body),
@@ -131,14 +178,18 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
       primaryColour,
       backgroundColour,
       textColour,
-      buttonStyle,
       fontFamily,
       borderRadius,
+      bannerWidth,
+      showOverlayBackdrop,
       showRejectAll,
       showManagePreferences,
       showCloseButton,
+      showPreferencesButton,
+      preferencesButtonPosition: showPreferencesButton ? preferencesButtonPosition : undefined,
       showLogo,
       logoUrl: logoUrl || undefined,
+      logoHeight: showLogo ? logoHeight : undefined,
       showCookieCount,
       cornerPosition,
       acceptButton: Object.keys(acceptButton).length > 0 ? acceptButton : undefined,
@@ -146,9 +197,10 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
       manageButton: Object.keys(manageButton).length > 0 ? manageButton : undefined,
     }),
     [
-      primaryColour, backgroundColour, textColour, buttonStyle, fontFamily,
-      borderRadius, showRejectAll, showManagePreferences, showCloseButton,
-      showLogo, logoUrl, showCookieCount, cornerPosition,
+      primaryColour, backgroundColour, textColour, fontFamily,
+      borderRadius, bannerWidth, showOverlayBackdrop, showRejectAll, showManagePreferences, showCloseButton,
+      showPreferencesButton, preferencesButtonPosition,
+      showLogo, logoUrl, logoHeight, showCookieCount, cornerPosition,
       acceptButton, rejectButton, manageButton,
     ],
   );
@@ -164,9 +216,12 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
       {/* Left panel — controls */}
       <div className="w-80 shrink-0 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
         {/* Display mode */}
-        <Card>
-          <CardContent className="p-5">
-            <h3 className="mb-3 font-heading text-sm font-semibold text-foreground">Display mode</h3>
+        <AccordionSection
+          id="display"
+          title="Display mode"
+          open={openSection === 'display'}
+          onToggle={toggleSection}
+        >
             <div className="grid grid-cols-2 gap-2">
               {DISPLAY_MODES.map((mode) => (
                 <button
@@ -204,13 +259,45 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
                 </div>
               </div>
             )}
-          </CardContent>
-        </Card>
+
+            {/* Overlay-only options */}
+            {displayMode === 'overlay' && (
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">
+                    Banner width ({bannerWidth}px)
+                  </label>
+                  <input
+                    type="range"
+                    min={280}
+                    max={960}
+                    step={10}
+                    value={bannerWidth}
+                    onChange={(e) => setBannerWidth(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+                <ToggleField
+                  label="Dim background (backdrop)"
+                  checked={showOverlayBackdrop}
+                  onChange={setShowOverlayBackdrop}
+                />
+                {!showOverlayBackdrop && (
+                  <p className="text-[11px] text-text-secondary/70">
+                    The page stays interactive behind the banner.
+                  </p>
+                )}
+              </div>
+            )}
+        </AccordionSection>
 
         {/* Theme */}
-        <Card>
-          <CardContent className="p-5">
-            <h3 className="mb-3 font-heading text-sm font-semibold text-foreground">Theme</h3>
+        <AccordionSection
+          id="theme"
+          title="Theme"
+          open={openSection === 'theme'}
+          onToggle={toggleSection}
+        >
             <div className="space-y-3">
               <ColourField label="Primary colour" value={primaryColour} onChange={setPrimaryColour} />
               <ColourField label="Background" value={backgroundColour} onChange={setBackgroundColour} />
@@ -242,87 +329,119 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
                 />
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-text-secondary">Default button style</label>
-                <div className="flex gap-2">
-                  {(['filled', 'outline'] as const).map((style) => (
-                    <button
-                      key={style}
-                      onClick={() => setButtonStyle(style)}
-                      className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
-                        buttonStyle === style
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-mist text-text-secondary hover:bg-mist/80'
-                      }`}
-                    >
-                      {style.charAt(0).toUpperCase() + style.slice(1)}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
-          </CardContent>
-        </Card>
+        </AccordionSection>
 
-        {/* Button styling */}
-        <Card>
-          <CardContent className="p-5">
-            <h3 className="mb-3 font-heading text-sm font-semibold text-foreground">Button styling</h3>
+        {/* Layout — decides which elements appear, so it comes before styling them */}
+        <AccordionSection
+          id="layout"
+          title="Layout"
+          open={openSection === 'layout'}
+          onToggle={toggleSection}
+        >
+            <div className="space-y-2.5">
+              <ToggleField label="Show cookie count" checked={showCookieCount} onChange={setShowCookieCount} />
+              <ToggleField label="Show logo" checked={showLogo} onChange={setShowLogo} />
+              {showLogo && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-secondary">Logo URL</label>
+                    <input
+                      type="url"
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                      placeholder="https://example.com/logo.svg"
+                      className="w-full rounded-lg border border-border px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-text-secondary">
+                      Logo height ({logoHeight}px)
+                    </label>
+                    <input
+                      type="range"
+                      min={12}
+                      max={120}
+                      value={logoHeight}
+                      onChange={(e) => setLogoHeight(Number(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+        </AccordionSection>
+
+        {/* Buttons — toggle each button on/off and style the ones that are shown */}
+        <AccordionSection
+          id="buttons"
+          title="Buttons"
+          open={openSection === 'buttons'}
+          onToggle={toggleSection}
+        >
             <p className="mb-3 text-xs text-text-secondary">
-              Override colours per button, or leave blank to use the theme defaults.
+              Toggle each button on or off and override its colours, or leave blank to use the theme defaults.
             </p>
-            <div className="space-y-4">
+
+            <div className="space-y-3">
               <ButtonStyleEditor
                 label="Accept button"
                 config={acceptButton}
                 onChange={setAcceptButton}
-                defaults={{ backgroundColour: primaryColour, textColour: '#ffffff', style: buttonStyle }}
+                defaults={{ backgroundColour: primaryColour, textColour: '#ffffff', style: 'filled' }}
               />
-              {showRejectAll && (
-                <ButtonStyleEditor
-                  label="Reject button"
-                  config={rejectButton}
-                  onChange={setRejectButton}
-                  defaults={{ backgroundColour: 'transparent', textColour, style: 'outline' }}
-                />
-              )}
-              {showManagePreferences && (
-                <ButtonStyleEditor
-                  label="Manage preferences"
-                  config={manageButton}
-                  onChange={setManageButton}
-                  defaults={{ backgroundColour: 'transparent', textColour, style: 'outline' }}
-                />
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Layout */}
-        <Card>
-          <CardContent className="p-5">
-            <h3 className="mb-3 font-heading text-sm font-semibold text-foreground">Layout</h3>
-            <div className="space-y-2.5">
-              <ToggleField label="Show 'Reject all' button" checked={showRejectAll} onChange={setShowRejectAll} />
-              <ToggleField label="Show 'Manage preferences'" checked={showManagePreferences} onChange={setShowManagePreferences} />
+              <ButtonStyleEditor
+                label="Reject button"
+                enabled={showRejectAll}
+                onToggle={setShowRejectAll}
+                config={rejectButton}
+                onChange={setRejectButton}
+                defaults={{ backgroundColour: 'transparent', textColour, style: 'outline' }}
+              />
+              <ButtonStyleEditor
+                label="Manage preferences"
+                enabled={showManagePreferences}
+                onToggle={setShowManagePreferences}
+                config={manageButton}
+                onChange={setManageButton}
+                defaults={{ backgroundColour: 'transparent', textColour, style: 'outline' }}
+              />
               <ToggleField label="Show close button" checked={showCloseButton} onChange={setShowCloseButton} />
-              <ToggleField label="Show cookie count" checked={showCookieCount} onChange={setShowCookieCount} />
-              <ToggleField label="Show logo" checked={showLogo} onChange={setShowLogo} />
-              {showLogo && (
+              <ToggleField
+                label="Show floating preferences button"
+                checked={showPreferencesButton}
+                onChange={setShowPreferencesButton}
+              />
+              {showPreferencesButton ? (
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Logo URL</label>
-                  <input
-                    type="url"
-                    value={logoUrl}
-                    onChange={(e) => setLogoUrl(e.target.value)}
-                    placeholder="https://example.com/logo.svg"
-                    className="w-full rounded-lg border border-border px-3 py-1.5 text-sm"
-                  />
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">
+                    Preferences button position
+                  </label>
+                  <div className="flex gap-2">
+                    {(['left', 'right'] as const).map((pos) => (
+                      <button
+                        key={pos}
+                        onClick={() => setPreferencesButtonPosition(pos)}
+                        className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                          preferencesButtonPosition === pos
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-mist text-text-secondary hover:bg-mist/80'
+                        }`}
+                      >
+                        {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+              ) : (
+                <p className="text-[11px] text-text-secondary/70">
+                  Visitors will have no built-in way to reopen their choices. Provide your own
+                  link calling <code>window.ConsentOS.showPreferences()</code> so consent stays
+                  as easy to withdraw as to give.
+                </p>
               )}
             </div>
-          </CardContent>
-        </Card>
+        </AccordionSection>
 
         {/* Save */}
         <div className="flex items-center gap-3">
@@ -340,16 +459,33 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
 
       {/* Right panel — preview */}
       <div className="flex-1">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between gap-3">
           <h3 className="font-heading text-sm font-semibold text-foreground">Live preview</h3>
-          <TabGroup
-            options={[
-              { value: 'desktop', label: 'Desktop' },
-              { value: 'mobile', label: 'Mobile' },
-            ]}
-            value={viewport}
-            onChange={(v) => setViewport(v as Viewport)}
-          />
+          <div className="flex items-center gap-3">
+            {translations && translations.length > 0 && (
+              <Select
+                value={previewLocale}
+                onChange={(e) => setPreviewLocale(e.target.value)}
+                className="w-auto"
+                aria-label="Preview language"
+              >
+                <option value="">Default (English)</option>
+                {translations.map((t) => (
+                  <option key={t.locale} value={t.locale}>
+                    {LOCALE_NAMES[t.locale] ?? t.locale} ({t.locale})
+                  </option>
+                ))}
+              </Select>
+            )}
+            <TabGroup
+              options={[
+                { value: 'desktop', label: 'Desktop' },
+                { value: 'mobile', label: 'Mobile' },
+              ]}
+              value={viewport}
+              onChange={(v) => setViewport(v as Viewport)}
+            />
+          </div>
         </div>
 
         <BannerPreview
@@ -359,6 +495,8 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
           viewport={viewport}
           privacyPolicyUrl={(config as Record<string, unknown>)?.privacy_policy_url as string ?? null}
           siteUrl={siteDomain}
+          previewLocale={previewLocale || undefined}
+          previewText={previewText}
         />
       </div>
     </div>
@@ -366,6 +504,47 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
 }
 
 /* ── Helper components ─────────────────────────────────────────────── */
+
+function AccordionSection({
+  id,
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  open: boolean;
+  onToggle: (id: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <Card>
+      <button
+        type="button"
+        onClick={() => onToggle(id)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-center justify-between p-5 text-left"
+      >
+        <h3 className="font-heading text-sm font-semibold text-foreground">{title}</h3>
+        <ChevronDown
+          className={`h-4 w-4 text-text-secondary transition-transform duration-200 ease-out motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {/* Animate height via the grid 0fr→1fr technique so dynamic content
+          collapses/expands smoothly without measuring its height. */}
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${
+          open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="overflow-hidden">
+          <CardContent className="p-5 pt-0">{children}</CardContent>
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 function ColourField({
   label,
@@ -424,22 +603,47 @@ function ButtonStyleEditor({
   config,
   onChange,
   defaults,
+  enabled,
+  onToggle,
 }: {
   label: string;
   config: ButtonConfig;
   onChange: (c: ButtonConfig) => void;
   defaults: { backgroundColour: string; textColour: string; style: string };
+  /** When provided, a show/hide toggle is rendered in the card header. */
+  enabled?: boolean;
+  onToggle?: (v: boolean) => void;
 }) {
   const update = (patch: Partial<ButtonConfig>) => onChange({ ...config, ...patch });
   const bgColour = config.backgroundColour ?? defaults.backgroundColour;
   const txtColour = config.textColour ?? defaults.textColour;
   const style = config.style ?? defaults.style;
 
+  const toggleable = onToggle !== undefined;
+  // Mandatory buttons (no toggle) are always editable; toggleable ones only
+  // expose their styling controls while enabled.
+  const open = !toggleable || enabled === true;
+
   return (
-    <div className="rounded-lg border border-border p-3">
-      <p className="mb-2 text-xs font-medium text-text-secondary">{label}</p>
-      <div className="space-y-2">
-        <div className="flex gap-2">
+    <div className={`rounded-lg border border-border p-3 ${toggleable && !open ? 'opacity-90' : ''}`}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-text-secondary">{label}</p>
+        {toggleable ? (
+          <input
+            type="checkbox"
+            aria-label={`Show ${label}`}
+            checked={enabled}
+            onChange={(e) => onToggle!(e.target.checked)}
+            className="h-4 w-4 cursor-pointer rounded border-border text-copper"
+          />
+        ) : (
+          <span className="text-[10px] font-medium uppercase tracking-wide text-text-secondary/50">
+            Always shown
+          </span>
+        )}
+      </div>
+      {open && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {(['filled', 'outline', 'text'] as const).map((s) => (
             <button
               key={s}
@@ -453,24 +657,26 @@ function ButtonStyleEditor({
               {s.charAt(0).toUpperCase() + s.slice(1)}
             </button>
           ))}
+          <span className="ml-auto flex items-center gap-1.5">
+            <input
+              type="color"
+              value={bgColour}
+              onChange={(e) => update({ backgroundColour: e.target.value })}
+              aria-label={`${label} background colour`}
+              title="Background"
+              className="h-6 w-6 cursor-pointer rounded border border-border"
+            />
+            <input
+              type="color"
+              value={txtColour}
+              onChange={(e) => update({ textColour: e.target.value })}
+              aria-label={`${label} text colour`}
+              title="Text"
+              className="h-6 w-6 cursor-pointer rounded border border-border"
+            />
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            value={bgColour}
-            onChange={(e) => update({ backgroundColour: e.target.value })}
-            className="h-6 w-6 cursor-pointer rounded border border-border"
-          />
-          <span className="text-xs text-text-secondary">Background</span>
-          <input
-            type="color"
-            value={txtColour}
-            onChange={(e) => update({ textColour: e.target.value })}
-            className="ml-auto h-6 w-6 cursor-pointer rounded border border-border"
-          />
-          <span className="text-xs text-text-secondary">Text</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

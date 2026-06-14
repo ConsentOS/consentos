@@ -17,6 +17,15 @@ _DOCS_CSP = (
     "connect-src 'self'"
 )
 
+_HOSTED_PAGE_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "connect-src 'self'"
+)
+
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all responses."""
@@ -39,6 +48,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Content-Security-Policy"] = "default-src 'unsafe-inline'"
         elif path in _DOCS_PATHS:
             response.headers["Content-Security-Policy"] = _DOCS_CSP
+            response.headers["X-Frame-Options"] = "DENY"
+        elif path.startswith("/c/"):
+            response.headers["Content-Security-Policy"] = _HOSTED_PAGE_CSP
             response.headers["X-Frame-Options"] = "DENY"
         else:
             response.headers["X-Frame-Options"] = "DENY"

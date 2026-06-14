@@ -8,6 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import get_db
 from src.models.site import Site
 from src.models.site_config import SiteConfig
+from src.routers.config import (
+    _get_site_group_id,
+    _load_group_defaults,
+    _load_org_defaults,
+)
 from src.schemas.auth import CurrentUser
 from src.schemas.site import (
     SiteConfigCreate,
@@ -17,6 +22,7 @@ from src.schemas.site import (
     SiteResponse,
     SiteUpdate,
 )
+from src.services.config_resolver import orm_to_config_dict, resolve_config
 from src.services.dependencies import require_role
 
 router = APIRouter(prefix="/sites", tags=["sites"])
@@ -126,13 +132,64 @@ async def deactivate_site(
 # ── Site config CRUD ─────────────────────────────────────────────────
 
 
+async def _editor_response(
+    config: SiteConfig, organisation_id: uuid.UUID, db: AsyncSession
+) -> dict:
+    """Serialise a site_configs row with the cascade applied.
+
+    The admin editor expects effective values for every scalar field:
+    NULLs on the row (a cleared override) are replaced with the value
+    the resolver would supply from the group / org / system layer. The
+    sibling ``/inheritance`` endpoint is the source of truth for *which*
+    layer supplied each value; this helper is only concerned with the
+    flattened, non-null payload the form needs to render.
+    """
+    site_dict = orm_to_config_dict(config)
+    org_defaults = await _load_org_defaults(organisation_id, db)
+    group_id = await _get_site_group_id(config.site_id, db)
+    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    resolved = resolve_config(
+        site_dict,
+        org_defaults=org_defaults,
+        group_defaults=group_defaults,
+    )
+
+    return {
+        "id": config.id,
+        "site_id": config.site_id,
+        "created_at": config.created_at,
+        "updated_at": config.updated_at,
+        "blocking_mode": resolved.get("blocking_mode"),
+        "regional_modes": resolved.get("regional_modes"),
+        "tcf_enabled": resolved.get("tcf_enabled"),
+        "tcf_publisher_cc": resolved.get("tcf_publisher_cc"),
+        "gpp_enabled": resolved.get("gpp_enabled"),
+        "gpp_supported_apis": resolved.get("gpp_supported_apis"),
+        "gpc_enabled": resolved.get("gpc_enabled"),
+        "gpc_jurisdictions": resolved.get("gpc_jurisdictions"),
+        "gpc_global_honour": resolved.get("gpc_global_honour"),
+        "gcm_enabled": resolved.get("gcm_enabled"),
+        "gcm_default": resolved.get("gcm_default"),
+        "shopify_privacy_enabled": resolved.get("shopify_privacy_enabled"),
+        "banner_config": resolved.get("banner_config"),
+        "privacy_policy_url": resolved.get("privacy_policy_url"),
+        "terms_url": resolved.get("terms_url"),
+        "scan_schedule_cron": resolved.get("scan_schedule_cron"),
+        "scan_max_pages": resolved.get("scan_max_pages"),
+        "consent_expiry_days": resolved.get("consent_expiry_days"),
+        "consent_retention_days": config.consent_retention_days,
+        "enabled_categories": resolved.get("enabled_categories"),
+        "disclosed_vendor_ids": resolved.get("disclosed_vendor_ids"),
+    }
+
+
 @router.get("/{site_id}/config", response_model=SiteConfigResponse)
 async def get_site_config(
     site_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor", "viewer")),
     db: AsyncSession = Depends(get_db),
-) -> SiteConfig:
-    """Get the configuration for a site."""
+) -> dict:
+    """Get the configuration for a site, with the cascade applied."""
     await _get_org_site(site_id, current_user.organisation_id, db)
     result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
     config = result.scalar_one_or_none()
@@ -141,7 +198,7 @@ async def get_site_config(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site configuration not found. Create one first.",
         )
-    return config
+    return await _editor_response(config, current_user.organisation_id, db)
 
 
 @router.put("/{site_id}/config", response_model=SiteConfigResponse)
@@ -150,7 +207,7 @@ async def create_or_replace_site_config(
     body: SiteConfigCreate,
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
-) -> SiteConfig:
+) -> dict:
     """Create or replace the full configuration for a site."""
     await _get_org_site(site_id, current_user.organisation_id, db)
 
@@ -162,13 +219,13 @@ async def create_or_replace_site_config(
             setattr(existing, field, value)
         await db.flush()
         await db.refresh(existing)
-        return existing
+        return await _editor_response(existing, current_user.organisation_id, db)
 
     config = SiteConfig(site_id=site_id, **body.model_dump())
     db.add(config)
     await db.flush()
     await db.refresh(config)
-    return config
+    return await _editor_response(config, current_user.organisation_id, db)
 
 
 @router.patch("/{site_id}/config", response_model=SiteConfigResponse)
@@ -177,7 +234,7 @@ async def update_site_config(
     body: SiteConfigUpdate,
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
-) -> SiteConfig:
+) -> dict:
     """Partially update the configuration for a site."""
     await _get_org_site(site_id, current_user.organisation_id, db)
 
@@ -195,7 +252,7 @@ async def update_site_config(
 
     await db.flush()
     await db.refresh(config)
-    return config
+    return await _editor_response(config, current_user.organisation_id, db)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

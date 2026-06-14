@@ -25,6 +25,8 @@ interface Props {
   privacyPolicyUrl: string | null;
   siteUrl?: string | null;
   previewLocale?: string;
+  /** Per-locale translation strings to render the banner text in. */
+  previewText?: Record<string, string>;
 }
 
 export default function BannerPreview({
@@ -35,17 +37,18 @@ export default function BannerPreview({
   privacyPolicyUrl,
   siteUrl,
   previewLocale,
+  previewText,
 }: Props) {
   const [iframeLoadFailed, setIframeLoadFailed] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const siteIframeRef = useRef<HTMLIFrameElement>(null);
   const bannerSrcdoc = useMemo(
-    () => buildBannerOnlyHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale),
-    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale],
+    () => buildBannerOnlyHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText),
+    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText],
   );
   const fallbackSrcdoc = useMemo(
-    () => buildPreviewHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale),
-    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale],
+    () => buildPreviewHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText),
+    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText],
   );
 
   const fullSiteUrl = useMemo(() => {
@@ -173,17 +176,17 @@ function buildBannerOnlyHtml(
   cornerPosition: CornerPosition,
   privacyUrl: string | null,
   previewLocale?: string,
+  previewText?: Record<string, string>,
 ): string {
   const bg = bc.backgroundColour ?? '#ffffff';
   const text = bc.textColour ?? '#1a1a2e';
   const primary = bc.primaryColour ?? '#2563eb';
   const font = bc.fontFamily ?? 'system-ui';
   const radius = bc.borderRadius ?? 6;
-  const defaultButtonStyle = bc.buttonStyle ?? 'filled';
 
-  const positionStyles = getPositionStyles(displayMode, cornerPosition, radius);
+  const positionStyles = getPositionStyles(displayMode, cornerPosition, radius, bc.bannerWidth);
   const { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, privacyLink, titleText, descriptionText } =
-    buildBannerParts(bc, primary, text, radius, privacyUrl, defaultButtonStyle);
+    buildBannerParts(bc, primary, text, radius, privacyUrl, previewText);
 
   const fontLink = bc.customFontUrl
     ? `<link rel="stylesheet" href="${escapeHtml(bc.customFontUrl)}">`
@@ -220,7 +223,7 @@ ${fontLink}
     position: relative;
   }
 
-  .cmp-logo { height: 28px; margin-bottom: 10px; display: block; }
+  .cmp-logo { width: auto; max-width: 100%; margin-bottom: 10px; display: block; }
   .consentos-banner__title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
   .consentos-banner__description { margin-bottom: 16px; opacity: 0.85; }
   .consentos-banner__link { color: ${primary}; text-decoration: underline; }
@@ -243,7 +246,7 @@ ${fontLink}
   }
 
   .cmp-overlay-bg {
-    display: ${displayMode === 'overlay' ? 'block' : 'none'};
+    display: ${displayMode === 'overlay' && bc.showOverlayBackdrop !== false ? 'block' : 'none'};
     position: fixed; inset: 0;
     background: rgba(0,0,0,0.4);
     z-index: 2147483646;
@@ -285,17 +288,17 @@ function buildPreviewHtml(
   cornerPosition: CornerPosition,
   privacyUrl: string | null,
   previewLocale?: string,
+  previewText?: Record<string, string>,
 ): string {
   const bg = bc.backgroundColour ?? '#ffffff';
   const text = bc.textColour ?? '#1a1a2e';
   const primary = bc.primaryColour ?? '#2563eb';
   const font = bc.fontFamily ?? 'system-ui';
   const radius = bc.borderRadius ?? 6;
-  const defaultButtonStyle = bc.buttonStyle ?? 'filled';
 
-  const positionStyles = getPositionStyles(displayMode, cornerPosition, radius);
+  const positionStyles = getPositionStyles(displayMode, cornerPosition, radius, bc.bannerWidth);
   const { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, privacyLink, titleText, descriptionText, savePreferencesText } =
-    buildBannerParts(bc, primary, text, radius, privacyUrl, defaultButtonStyle);
+    buildBannerParts(bc, primary, text, radius, privacyUrl, previewText);
 
   const fontLink = bc.customFontUrl
     ? `<link rel="stylesheet" href="${escapeHtml(bc.customFontUrl)}">`
@@ -303,8 +306,8 @@ function buildPreviewHtml(
 
   const langAttr = previewLocale ? escapeHtml(previewLocale) : 'en';
 
-  // Build the save preferences button with accept button styling
-  const acceptStyle = buildButtonStyle(bc.acceptButton, defaultButtonStyle, primary, '#ffffff', 'none', radius);
+  // Build the save preferences button with accept button styling (filled by default)
+  const acceptStyle = buildButtonStyle(bc.acceptButton, 'filled', primary, '#ffffff', 'none', radius);
   const saveBtnHtml = `<button class="cmp-btn cmp-btn--primary cmp-btn--save" style="${acceptStyle}">${escapeHtml(savePreferencesText)}</button>`;
 
   return `<!DOCTYPE html>
@@ -350,7 +353,7 @@ ${fontLink}
     position: relative;
   }
 
-  .cmp-logo { height: 28px; margin-bottom: 10px; display: block; }
+  .cmp-logo { width: auto; max-width: 100%; margin-bottom: 10px; display: block; }
   .consentos-banner__title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
   .consentos-banner__description { margin-bottom: 16px; opacity: 0.85; }
   .consentos-banner__link { color: ${primary}; text-decoration: underline; }
@@ -387,7 +390,7 @@ ${fontLink}
   .cmp-btn--save { margin-top: 12px; width: 100%; }
 
   .cmp-overlay-bg {
-    display: ${displayMode === 'overlay' ? 'block' : 'none'};
+    display: ${displayMode === 'overlay' && bc.showOverlayBackdrop !== false ? 'block' : 'none'};
     position: fixed; inset: 0;
     background: rgba(0,0,0,0.4);
     z-index: 2147483646;
@@ -506,19 +509,24 @@ function buildBannerParts(
   text: string,
   radius: number,
   privacyUrl: string | null,
-  defaultButtonStyle: 'filled' | 'outline',
+  previewText?: Record<string, string>,
 ) {
-  const acceptStyle = buildButtonStyle(bc.acceptButton, defaultButtonStyle, primary, '#ffffff', 'none', radius);
-  const rejectStyle = buildButtonStyle(bc.rejectButton, defaultButtonStyle, 'transparent', text, 'rgba(0,0,0,0.2)', radius);
-  const manageStyle = buildButtonStyle(bc.manageButton, defaultButtonStyle, 'transparent', text, 'rgba(0,0,0,0.2)', radius);
+  // Each button falls back to its own default style: the primary Accept
+  // button is filled, the secondary Reject/Manage buttons are outlined.
+  const acceptStyle = buildButtonStyle(bc.acceptButton, 'filled', primary, '#ffffff', 'none', radius);
+  const rejectStyle = buildButtonStyle(bc.rejectButton, 'outline', 'transparent', text, 'rgba(0,0,0,0.2)', radius);
+  const manageStyle = buildButtonStyle(bc.manageButton, 'outline', 'transparent', text, 'rgba(0,0,0,0.2)', radius);
 
-  // Resolve text content from config or defaults
-  const titleText = bc.text?.title ?? DEFAULT_TITLE;
-  const descriptionText = bc.text?.description ?? DEFAULT_DESCRIPTION;
-  const acceptAllText = bc.text?.acceptAll ?? DEFAULT_ACCEPT_ALL;
-  const rejectAllText = bc.text?.rejectAll ?? DEFAULT_REJECT_ALL;
-  const managePreferencesText = bc.text?.managePreferences ?? DEFAULT_MANAGE_PREFERENCES;
-  const savePreferencesText = bc.text?.savePreferences ?? DEFAULT_SAVE_PREFERENCES;
+  // Resolve text: a previewed language's translation strings win, then the
+  // banner's own text overrides, then the built-in English defaults.
+  const str = (key: keyof NonNullable<BannerConfig['text']>, fallback: string): string =>
+    previewText?.[key] || bc.text?.[key] || fallback;
+  const titleText = str('title', DEFAULT_TITLE);
+  const descriptionText = str('description', DEFAULT_DESCRIPTION);
+  const acceptAllText = str('acceptAll', DEFAULT_ACCEPT_ALL);
+  const rejectAllText = str('rejectAll', DEFAULT_REJECT_ALL);
+  const managePreferencesText = str('managePreferences', DEFAULT_MANAGE_PREFERENCES);
+  const savePreferencesText = str('savePreferences', DEFAULT_SAVE_PREFERENCES);
 
   const acceptBtn = `<button class="cmp-btn" style="${acceptStyle}">${escapeHtml(acceptAllText)}</button>`;
 
@@ -534,8 +542,9 @@ function buildBannerParts(
     ? `<button class="cmp-close" aria-label="Close">&times;</button>`
     : '';
 
+  const logoHeight = Math.min(120, Math.max(12, Math.round(bc.logoHeight ?? 28)));
   const logoHtml = bc.showLogo && bc.logoUrl
-    ? `<img src="${escapeHtml(bc.logoUrl)}" alt="Logo" class="cmp-logo" />`
+    ? `<img src="${escapeHtml(bc.logoUrl)}" alt="Logo" class="cmp-logo" style="height:${logoHeight}px" />`
     : '';
 
   const cookieCount = bc.showCookieCount
@@ -549,12 +558,18 @@ function buildBannerParts(
   return { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, privacyLink, titleText, descriptionText, savePreferencesText };
 }
 
-function getPositionStyles(mode: DisplayMode, cornerPosition: CornerPosition, radius: number): string {
+function getPositionStyles(
+  mode: DisplayMode,
+  cornerPosition: CornerPosition,
+  radius: number,
+  bannerWidth?: number,
+): string {
+  const width = Math.min(960, Math.max(280, Math.round(bannerWidth ?? 600)));
   switch (mode) {
     case 'top_banner':
       return 'position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;';
     case 'overlay':
-      return `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483647; width: 90%; max-width: 600px; border-radius: ${radius}px;`;
+      return `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2147483647; width: 90%; max-width: ${width}px; border-radius: ${radius}px;`;
     case 'corner_popup': {
       const side = cornerPosition === 'left' ? 'left: 20px;' : 'right: 20px;';
       return `position: fixed; bottom: 20px; ${side} z-index: 2147483647; width: 380px; max-width: calc(100% - 40px); border-radius: ${radius}px;`;

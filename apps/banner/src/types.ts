@@ -80,6 +80,12 @@ export interface SiteConfig {
   gcm_default: Record<string, 'granted' | 'denied'> | null;
   shopify_privacy_enabled: boolean;
   banner_config: BannerConfig | null;
+  /**
+   * Number of allow-listed cookies for the site, supplied by the API.
+   * Rendered as "N cookies used on this site" when ``showCookieCount`` is
+   * enabled. Absent on older API responses (the line is then omitted).
+   */
+  cookie_count?: number;
   privacy_policy_url: string | null;
   terms_url: string | null;
   consent_expiry_days: number;
@@ -157,19 +163,33 @@ export interface BannerTextConfig {
 export interface BannerConfig {
   displayMode?: 'bottom_banner' | 'top_banner' | 'overlay' | 'corner_popup';
   cornerPosition?: 'left' | 'right';
+  /**
+   * Whether the dimming backdrop is shown behind the overlay (modal) banner.
+   * Only applies to the overlay display mode. Defaults to true; set to false
+   * to leave the page interactive behind an informational overlay.
+   */
+  showOverlayBackdrop?: boolean;
   primaryColour?: string;
   backgroundColour?: string;
   textColour?: string;
-  buttonStyle?: 'filled' | 'outline';
   fontFamily?: string;
   customFontUrl?: string;
   borderRadius?: number;
+  /**
+   * Preferred banner width in pixels for the overlay (modal) display mode.
+   * Other modes use their own fixed/full-width layout. Defaults to 600.
+   */
+  bannerWidth?: number;
   showLogo?: boolean;
   logoUrl?: string;
+  /** Logo height in pixels (width scales automatically). Defaults to 28. */
+  logoHeight?: number;
   showRejectAll?: boolean;
   showManagePreferences?: boolean;
   showCloseButton?: boolean;
   showCookieCount?: boolean;
+  showPreferencesButton?: boolean;
+  preferencesButtonPosition?: 'left' | 'right';
   acceptButton?: ButtonConfig;
   rejectButton?: ButtonConfig;
   manageButton?: ButtonConfig;

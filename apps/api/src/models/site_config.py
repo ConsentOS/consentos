@@ -19,34 +19,37 @@ class SiteConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
     )
 
-    # Blocking mode
-    blocking_mode: Mapped[str] = mapped_column(String(20), server_default="opt_in", nullable=False)
+    # Blocking mode. Nullable so a site override can be cleared and the
+    # cascade (group -> org -> system) resolves the effective value.
+    blocking_mode: Mapped[str | None] = mapped_column(
+        String(20), server_default="opt_in", nullable=True
+    )
     regional_modes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # TCF
-    tcf_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    tcf_enabled: Mapped[bool | None] = mapped_column(default=False, nullable=True)
     tcf_publisher_cc: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     # GPP (Global Privacy Platform)
-    gpp_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    gpp_enabled: Mapped[bool | None] = mapped_column(default=True, nullable=True)
     gpp_supported_apis: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # GPC (Global Privacy Control)
-    gpc_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    gpc_enabled: Mapped[bool | None] = mapped_column(default=True, nullable=True)
     gpc_jurisdictions: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    gpc_global_honour: Mapped[bool] = mapped_column(default=False, nullable=False)
+    gpc_global_honour: Mapped[bool | None] = mapped_column(default=False, nullable=True)
 
     # Google Consent Mode
-    gcm_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    gcm_enabled: Mapped[bool | None] = mapped_column(default=True, nullable=True)
     gcm_default: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Shopify Customer Privacy API
-    shopify_privacy_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    shopify_privacy_enabled: Mapped[bool | None] = mapped_column(default=False, nullable=True)
 
     # Banner
     banner_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    display_mode: Mapped[str] = mapped_column(
-        String(30), server_default="bottom_banner", nullable=False
+    display_mode: Mapped[str | None] = mapped_column(
+        String(30), server_default="bottom_banner", nullable=True
     )
     privacy_policy_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     terms_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -65,10 +68,12 @@ class SiteConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Scanning
     scan_schedule_cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    scan_max_pages: Mapped[int] = mapped_column(Integer, server_default="50", nullable=False)
+    scan_max_pages: Mapped[int | None] = mapped_column(Integer, server_default="50", nullable=True)
 
     # Consent
-    consent_expiry_days: Mapped[int] = mapped_column(Integer, server_default="365", nullable=False)
+    consent_expiry_days: Mapped[int | None] = mapped_column(
+        Integer, server_default="365", nullable=True
+    )
     consent_retention_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationship

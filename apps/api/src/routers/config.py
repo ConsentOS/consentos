@@ -1,12 +1,12 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.extensions.registry import get_registry
-from src.models.cookie import CookieCategory
+from src.models.cookie import Cookie, CookieAllowListEntry, CookieCategory
 from src.models.iab_gvl import IabGvlMeta
 from src.models.org_config import OrgConfig
 from src.models.site import Site
@@ -32,8 +32,15 @@ router = APIRouter(prefix="/config", tags=["config"])
 async def get_public_site_config(
     site_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-) -> SiteConfig:
-    """Public endpoint: retrieve site config for the banner script. No auth required."""
+) -> dict:
+    """Public endpoint: retrieve site config. No auth required.
+
+    Returned values are cascade-resolved (system / org / group / site)
+    so scalar fields are always concrete, even when the row has nulls
+    from an operator clearing an override. The banner script itself
+    uses ``/sites/{id}/geo-resolved`` for region-aware resolution; this
+    endpoint exists for tooling that just wants the effective shape.
+    """
     result = await db.execute(
         select(SiteConfig)
         .join(Site)
@@ -49,7 +56,44 @@ async def get_public_site_config(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site configuration not found",
         )
-    return config
+
+    org_id = await _get_site_org_id(site_id, db)
+    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
+    group_id = await _get_site_group_id(site_id, db)
+    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    resolved = resolve_config(
+        orm_to_config_dict(config),
+        org_defaults=org_defaults,
+        group_defaults=group_defaults,
+    )
+
+    return {
+        "id": config.id,
+        "site_id": config.site_id,
+        "created_at": config.created_at,
+        "updated_at": config.updated_at,
+        "blocking_mode": resolved.get("blocking_mode"),
+        "regional_modes": resolved.get("regional_modes"),
+        "tcf_enabled": resolved.get("tcf_enabled"),
+        "tcf_publisher_cc": resolved.get("tcf_publisher_cc"),
+        "gpp_enabled": resolved.get("gpp_enabled"),
+        "gpp_supported_apis": resolved.get("gpp_supported_apis"),
+        "gpc_enabled": resolved.get("gpc_enabled"),
+        "gpc_jurisdictions": resolved.get("gpc_jurisdictions"),
+        "gpc_global_honour": resolved.get("gpc_global_honour"),
+        "gcm_enabled": resolved.get("gcm_enabled"),
+        "gcm_default": resolved.get("gcm_default"),
+        "shopify_privacy_enabled": resolved.get("shopify_privacy_enabled"),
+        "banner_config": resolved.get("banner_config"),
+        "privacy_policy_url": resolved.get("privacy_policy_url"),
+        "terms_url": resolved.get("terms_url"),
+        "scan_schedule_cron": resolved.get("scan_schedule_cron"),
+        "scan_max_pages": resolved.get("scan_max_pages"),
+        "consent_expiry_days": resolved.get("consent_expiry_days"),
+        "consent_retention_days": config.consent_retention_days,
+        "enabled_categories": resolved.get("enabled_categories"),
+        "disclosed_vendor_ids": resolved.get("disclosed_vendor_ids"),
+    }
 
 
 @router.get("/sites/{site_id}/resolved")
@@ -105,11 +149,13 @@ async def get_resolved_config(
 
     gvl_version = await _load_gvl_version(db)
     category_tcf_purposes = await _load_category_tcf_purposes(db)
+    cookie_count = await _load_cookie_count(db, site_id)
     return build_public_config(
         str(site_id),
         resolved,
         gvl_version=gvl_version,
         category_tcf_purposes=category_tcf_purposes,
+        cookie_count=cookie_count,
     )
 
 
@@ -158,11 +204,13 @@ async def get_geo_resolved_config(
     )
     gvl_version = await _load_gvl_version(db)
     category_tcf_purposes = await _load_category_tcf_purposes(db)
+    cookie_count = await _load_cookie_count(db, site_id)
     public = build_public_config(
         str(site_id),
         resolved,
         gvl_version=gvl_version,
         category_tcf_purposes=category_tcf_purposes,
+        cookie_count=cookie_count,
     )
 
     # Include detected geo info so the banner can use it
@@ -187,11 +235,110 @@ async def _load_site_translations(
     config. Empty when the site has no translations (banner uses English).
     """
     result = await db.execute(
-        select(Translation.locale, Translation.strings).where(
-            Translation.site_id == site_id
-        )
+        select(Translation.locale, Translation.strings).where(Translation.site_id == site_id)
     )
     return {locale: strings for locale, strings in result.all()}
+
+
+@router.get("/sites/{site_id}/cookies")
+async def get_public_cookies(
+    site_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Public endpoint: cookies grouped by category for the embedded widget.
+
+    Returns the same shape the hosted-page template used to render server
+    side, as JSON. Categories are filtered to those the site has enabled
+    via the resolved cascade; cookies with no category fall under an
+    explicit ``uncategorised`` bucket so operators can spot them.
+    """
+    site_result = await db.execute(
+        select(Site).where(
+            Site.id == site_id,
+            Site.is_active.is_(True),
+            Site.deleted_at.is_(None),
+        )
+    )
+    site = site_result.scalar_one_or_none()
+    if site is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site not found",
+        )
+
+    config_result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
+    config = config_result.scalar_one_or_none()
+
+    org_id = await _get_site_org_id(site_id, db)
+    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
+    group_id = await _get_site_group_id(site_id, db)
+    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    resolved = resolve_config(
+        orm_to_config_dict(config) if config else {},
+        org_defaults=org_defaults,
+        group_defaults=group_defaults,
+    )
+    enabled_slugs = set(resolved.get("enabled_categories") or [])
+
+    cat_result = await db.execute(select(CookieCategory).order_by(CookieCategory.display_order))
+    all_categories = list(cat_result.scalars().all())
+
+    cookie_result = await db.execute(
+        select(Cookie).where(Cookie.site_id == site_id).order_by(Cookie.name)
+    )
+    cookies = list(cookie_result.scalars().all())
+
+    by_cat_id: dict[uuid.UUID, list[Cookie]] = {}
+    uncategorised: list[Cookie] = []
+    for cookie in cookies:
+        if cookie.category_id:
+            by_cat_id.setdefault(cookie.category_id, []).append(cookie)
+        else:
+            uncategorised.append(cookie)
+
+    categories_out = []
+    for cat in all_categories:
+        if cat.slug not in enabled_slugs:
+            continue
+        categories_out.append(
+            {
+                "slug": cat.slug,
+                "name": cat.name,
+                "description": cat.description or "",
+                "locked": cat.is_essential,
+                "cookies": [_cookie_to_dict(c) for c in by_cat_id.get(cat.id, [])],
+            }
+        )
+
+    if uncategorised:
+        categories_out.append(
+            {
+                "slug": "uncategorised",
+                "name": "Uncategorised",
+                "description": ("Cookies that have not yet been assigned to a category."),
+                "locked": False,
+                "cookies": [_cookie_to_dict(c) for c in uncategorised],
+            }
+        )
+
+    return {
+        "site_id": str(site_id),
+        "site_name": site.display_name or site.domain,
+        "domain": site.domain,
+        "privacy_policy_url": resolved.get("privacy_policy_url"),
+        "consent_expiry_days": resolved.get("consent_expiry_days") or 365,
+        "categories": categories_out,
+    }
+
+
+def _cookie_to_dict(cookie: Cookie) -> dict:
+    return {
+        "name": cookie.name,
+        "domain": cookie.domain,
+        "type": cookie.storage_type,
+        "description": cookie.description or "",
+        "vendor": cookie.vendor or "",
+    }
 
 
 @router.get("/geo")
@@ -380,6 +527,20 @@ async def _load_gvl_version(db: AsyncSession) -> int | None:
     """
     result = await db.execute(select(IabGvlMeta.vendor_list_version).limit(1))
     return result.scalar_one_or_none()
+
+
+async def _load_cookie_count(db: AsyncSession, site_id: uuid.UUID) -> int:
+    """Return the number of allow-listed cookies for the site.
+
+    Surfaced into the public config so the banner can render the optional
+    "N cookies used on this site" line when ``showCookieCount`` is enabled.
+    """
+    result = await db.execute(
+        select(func.count())
+        .select_from(CookieAllowListEntry)
+        .where(CookieAllowListEntry.site_id == site_id)
+    )
+    return int(result.scalar_one() or 0)
 
 
 async def _load_category_tcf_purposes(db: AsyncSession) -> dict[str, list[int]]:

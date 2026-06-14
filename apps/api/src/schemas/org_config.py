@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.schemas.site import BlockingMode
+from src.schemas.validators import coerce_blank_to_none
 
 
 class OrgConfigUpdate(BaseModel):
@@ -33,6 +34,14 @@ class OrgConfigUpdate(BaseModel):
     consent_retention_days: int | None = Field(default=None, ge=1, le=730)
     enabled_categories: list[str] | None = None
     disclosed_vendor_ids: list[int] | None = None
+
+    _coerce_blank = field_validator(
+        "tcf_publisher_cc",
+        "privacy_policy_url",
+        "terms_url",
+        "scan_schedule_cron",
+        mode="before",
+    )(coerce_blank_to_none)
 
 
 class OrgConfigResponse(BaseModel):

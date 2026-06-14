@@ -59,6 +59,12 @@ def _mock_config(**overrides):
     config.scan_schedule_cron = overrides.get("scan_schedule_cron")
     config.scan_max_pages = overrides.get("scan_max_pages", 50)
     config.consent_expiry_days = overrides.get("consent_expiry_days", 365)
+    config.consent_retention_days = overrides.get("consent_retention_days")
+    config.terms_url = overrides.get("terms_url")
+    config.shopify_privacy_enabled = overrides.get("shopify_privacy_enabled", False)
+    config.regional_modes = overrides.get("regional_modes")
+    config.enabled_categories = overrides.get("enabled_categories")
+    config.disclosed_vendor_ids = overrides.get("disclosed_vendor_ids")
     config.created_at = datetime.now(UTC)
     config.updated_at = datetime.now(UTC)
     return config
@@ -202,7 +208,10 @@ class TestSiteConfig:
     async def test_get_config_success(self, mock_app):
         site = _mock_site()
         config = _mock_config(site_id=site.id)
-        db = _mock_db_sequence(site, config)
+        # Extra Nones cover the cascade-loading queries: org defaults
+        # and site_group_id lookup. Both being None means "no overrides
+        # at parent layers, fall through to system defaults".
+        db = _mock_db_sequence(site, config, None, None)
         async with await _client(mock_app, db) as client:
             resp = await client.get(f"/api/v1/sites/{site.id}/config", headers=_auth_headers())
         assert resp.status_code == 200
@@ -218,7 +227,8 @@ class TestSiteConfig:
     @pytest.mark.asyncio
     async def test_put_config_create(self, mock_app):
         site = _mock_site()
-        db = _mock_db_sequence(site, None)  # site found, no existing config
+        # site found, no existing config, then cascade lookups (both None).
+        db = _mock_db_sequence(site, None, None, None)
         async with await _client(mock_app, db) as client:
             resp = await client.put(
                 f"/api/v1/sites/{site.id}/config",
@@ -231,7 +241,7 @@ class TestSiteConfig:
     async def test_put_config_replace(self, mock_app):
         site = _mock_site()
         config = _mock_config(site_id=site.id)
-        db = _mock_db_sequence(site, config)
+        db = _mock_db_sequence(site, config, None, None)
         async with await _client(mock_app, db) as client:
             resp = await client.put(
                 f"/api/v1/sites/{site.id}/config",
@@ -244,7 +254,7 @@ class TestSiteConfig:
     async def test_patch_config_success(self, mock_app):
         site = _mock_site()
         config = _mock_config(site_id=site.id)
-        db = _mock_db_sequence(site, config)
+        db = _mock_db_sequence(site, config, None, None)
         async with await _client(mock_app, db) as client:
             resp = await client.patch(
                 f"/api/v1/sites/{site.id}/config",

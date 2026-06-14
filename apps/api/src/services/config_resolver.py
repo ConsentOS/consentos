@@ -51,6 +51,11 @@ SYSTEM_DEFAULTS: dict[str, Any] = {
     "privacy_policy_url": None,
     "terms_url": None,
     "consent_expiry_days": 365,
+    # ``scan_max_pages`` is now a nullable column on ``site_configs``
+    # (so the admin can "Reset to inherited") but it doesn't actually
+    # cascade through org/group — it's per-site. Carry a system-level
+    # fallback here so the editor never has to render a NULL value.
+    "scan_max_pages": 50,
     # All five categories visible by default; any cascade layer may
     # narrow this to a subset. The resolver normalises the result
     # via ``_normalise_enabled_categories``.
@@ -135,6 +140,7 @@ def build_public_config(
     *,
     gvl_version: int | None = None,
     category_tcf_purposes: dict[str, list[int]] | None = None,
+    cookie_count: int = 0,
 ) -> dict[str, Any]:
     """Build a public configuration JSON for the banner script.
 
@@ -166,6 +172,9 @@ def build_public_config(
         "gcm_default": resolved.get("gcm_default"),
         "shopify_privacy_enabled": resolved["shopify_privacy_enabled"],
         "banner_config": resolved.get("banner_config"),
+        # Number of allow-listed cookies; rendered by the banner when the
+        # ``showCookieCount`` option is enabled.
+        "cookie_count": cookie_count,
         "privacy_policy_url": resolved.get("privacy_policy_url"),
         "terms_url": resolved.get("terms_url"),
         "consent_expiry_days": resolved["consent_expiry_days"],

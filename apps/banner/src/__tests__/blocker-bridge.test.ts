@@ -42,7 +42,7 @@ vi.mock('../i18n', () => ({
   DEFAULT_TRANSLATIONS: {},
   detectLocale: vi.fn(() => 'en'),
   interpolate: vi.fn((s: string) => s),
-  loadTranslations: vi.fn(async () => ({})),
+  selectTranslations: vi.fn(() => ({})),
   renderLinks: vi.fn((s: string) => s),
 }));
 

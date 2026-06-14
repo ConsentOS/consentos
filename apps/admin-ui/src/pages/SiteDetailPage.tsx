@@ -107,6 +107,7 @@ export default function SiteDetailPage() {
           config={config ?? null}
           onSave={(body) => updateSiteConfig(siteId, body)}
           siteDomain={site.domain}
+          siteId={siteId}
         />
       )}
       {activeTab === 'translations' && siteId && <SiteTranslationsTab siteId={siteId} />}
