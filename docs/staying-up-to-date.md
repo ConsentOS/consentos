@@ -1,46 +1,37 @@
 # Staying up to date
 
-The admin UI shows a notice when a newer ConsentOS release is available.
-This page explains how to upgrade to it.
+The admin dashboard shows a notice when a newer ConsentOS release is
+available, with the running version in the footer. Follow the steps
+below for your deployment method.
 
-Releases are published to GHCR, tagged with the version and `latest`:
-
-- `ghcr.io/consentos/consentos-api`
-- `ghcr.io/consentos/consentos-scanner`
-- `ghcr.io/consentos/consentos-admin-ui`
-
-See the [release notes](https://github.com/ConsentOS/consentos/releases)
-for what changed before upgrading.
+Releases are published to GHCR as `ghcr.io/consentos/consentos-api`,
+`...-scanner`, and `...-admin-ui`, tagged with the version and `latest`.
 
 ## Docker Compose
 
-Pin the image tag to the new version (or use `latest`), then pull and
-recreate:
+1. Read the [release notes](https://github.com/ConsentOS/consentos/releases)
+   for the new version.
+2. Pin the image tag in your `docker-compose.yml` to the new version (or
+   leave it tracking `latest`).
+3. Pull the new images and recreate the containers:
 
-```bash
-docker compose pull
-docker compose up -d
-```
+   ```bash
+   docker compose pull
+   docker compose up -d
+   ```
 
-Apply any new database migrations after the API container is up:
-
-```bash
-docker compose exec api alembic upgrade head
-```
+4. Reload the admin dashboard. The footer should show the new version
+   and the update notice should be gone.
 
 ## Helm / Kubernetes
 
-Bump the image tag (and chart `appVersion`) to the new release and roll
-it out:
+1. Read the [release notes](https://github.com/ConsentOS/consentos/releases)
+   for the new version.
+2. Bump the image tag and roll out the release:
 
-```bash
-helm upgrade consentos ./helm/consentos --set image.tag=<version>
-```
+   ```bash
+   helm upgrade consentos ./helm/consentos --set image.tag=<version>
+   ```
 
-Migrations run via the chart's pre-upgrade hook; check the release notes
-for any manual steps.
-
-## After upgrading
-
-Reload the admin UI and confirm the footer shows the new version and the
-update notice has cleared.
+3. Reload the admin dashboard. The footer should show the new version
+   and the update notice should be gone.
