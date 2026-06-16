@@ -126,6 +126,16 @@ class TestGetVersionInfo:
             info = await update_check.get_version_info(_settings())
         assert info["update_available"] is False
 
+    @pytest.mark.asyncio
+    async def test_prefixed_app_version_is_normalised(self):
+        with patch(
+            "src.services.update_check.get_cached_latest_version",
+            new_callable=AsyncMock,
+            return_value="0.3.0",
+        ):
+            info = await update_check.get_version_info(_settings(app_version="v0.2.0"))
+        assert info["current"] == "0.2.0"
+
 
 # ── Endpoint ─────────────────────────────────────────────────────────
 

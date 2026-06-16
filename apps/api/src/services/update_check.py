@@ -104,7 +104,7 @@ async def get_cached_latest_version(settings: Settings) -> str | None:
 
 async def get_version_info(settings: Settings) -> dict:
     """Assemble the payload behind ``GET /api/v1/system/version``."""
-    current = settings.app_version
+    current = settings.app_version.strip().lstrip("vV")
     latest = await get_cached_latest_version(settings)
     return {
         "current": current,
