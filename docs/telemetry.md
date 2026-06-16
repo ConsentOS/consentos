@@ -131,14 +131,10 @@ api:
     TELEMETRY_ENABLED: "false"
 ```
 
-## Endpoint and transport
-
-The heartbeat is POSTed to `https://telemetry.consentos.dev/v1/heartbeat`.
-Network failures are logged and swallowed — telemetry must never break
-the worker.
-
 ## Schedule
 
 The heartbeat runs daily at 02:30 UTC via Celery beat
 (`telemetry-heartbeat` in `src/celery_app.py`). It is independent of
 all other scheduled jobs and a failure in one never affects the other.
+Network failures are logged and swallowed; telemetry never breaks the
+worker.
