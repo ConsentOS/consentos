@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.3.0] - 2026-06-28
+### :sparkles: New Features
+- [`36ad1ed`](https://github.com/ConsentOS/consentos/commit/36ad1ed2c01d006874027bf842e169a988340cdf) - **banner**: lifecycle events and cross-tab consent sync (CMP-126) *(PR [#41](https://github.com/ConsentOS/consentos/pull/41) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`3a2f5b8`](https://github.com/ConsentOS/consentos/commit/3a2f5b88a4579dc7949a534fff256f2bcbb23ed1) - **banner**: embedded cookies widget replacing the hosted page *(PR [#43](https://github.com/ConsentOS/consentos/pull/43) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`7f03de0`](https://github.com/ConsentOS/consentos/commit/7f03de0ad628a63f46cbf1feffaac92edcd5ff75) - **admin**: add ui toggle to preferences button.  *(PR [#44](https://github.com/ConsentOS/consentos/pull/44) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`fc5b68c`](https://github.com/ConsentOS/consentos/commit/fc5b68cb14dc24f6ff68a0dd111844c147697e9c) - show a notice when a newer release is available *(PR [#46](https://github.com/ConsentOS/consentos/pull/46) by [@jamescottrill](https://github.com/jamescottrill))*
+
+### :bug: Bug Fixes
+- [`1056ba4`](https://github.com/ConsentOS/consentos/commit/1056ba4b5e452d7ea840be6d85da57785e3dc31e) - **banner**: default the preferences button on after consent *(PR [#42](https://github.com/ConsentOS/consentos/pull/42) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`648a22b`](https://github.com/ConsentOS/consentos/commit/648a22b4d743596be4c4a23618a37618df918548) - **api**: assert route registration via OpenAPI schema *(PR [#45](https://github.com/ConsentOS/consentos/pull/45) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`3bac27f`](https://github.com/ConsentOS/consentos/commit/3bac27f699142975301c326bcb41360950a8ebc7) - **banner**: deliver translations embedded in the site config *(PR [#35](https://github.com/ConsentOS/consentos/pull/35) by [@cmaerz](https://github.com/cmaerz))*
+
+
 ## [v0.2.0] - 2026-06-12
 ### :sparkles: New Features
 - [`142e237`](https://github.com/ConsentOS/consentos/commit/142e2373d3c788c683f0e3a060bc398c22022741) - consent records page, tab persistence, and snippet copy fix *(PR [#9](https://github.com/ConsentOS/consentos/pull/9) by [@jamescottrill](https://github.com/jamescottrill))*
@@ -48,3 +61,4 @@ Initial public release of ConsentOS.
 - **Infrastructure:** Docker Compose (dev/test/prod), Helm chart, Ansible playbooks
 - **CI:** GitHub Actions pipeline with linting, testing, type checking, and bundle size checks
 [v0.2.0]: https://github.com/ConsentOS/consentos/compare/0.1.0...v0.2.0
+[v0.3.0]: https://github.com/ConsentOS/consentos/compare/v0.2.0...v0.3.0
