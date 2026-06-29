@@ -216,3 +216,45 @@ class TestAllowListRoutes:
         entry_id = uuid.uuid4()
         resp = await client.delete(f"/api/v1/cookies/sites/{site_id}/allow-list/{entry_id}")
         assert resp.status_code == 401
+
+
+# ─── Integration tests ───────────────────────────────────────────────
+
+try:
+    from tests.conftest import create_test_site, requires_db
+except ImportError:
+    from conftest import create_test_site, requires_db
+
+
+@requires_db
+class TestCreateCookieIntegration:
+    """Integration tests for manual cookie creation against a live DB."""
+
+    async def test_create_cookie_success(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers, domain_prefix="cookie-add")
+        resp = await db_client.post(
+            f"/api/v1/cookies/sites/{site_id}",
+            json={"name": "_ga", "domain": ".example.com"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["name"] == "_ga"
+        assert data["review_status"] == "pending"
+
+    async def test_create_cookie_duplicate_returns_409(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers, domain_prefix="cookie-dup")
+        body = {"name": "_ga", "domain": ".example.com", "storage_type": "cookie"}
+
+        first = await db_client.post(
+            f"/api/v1/cookies/sites/{site_id}", json=body, headers=auth_headers
+        )
+        assert first.status_code == 201
+
+        # Same (name, domain, storage_type) — must be a clean 409, not a
+        # flush-time IntegrityError surfacing as 500.
+        second = await db_client.post(
+            f"/api/v1/cookies/sites/{site_id}", json=body, headers=auth_headers
+        )
+        assert second.status_code == 409
+        assert "already exists" in second.json()["detail"]

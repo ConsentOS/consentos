@@ -186,7 +186,7 @@ class TestCookieCRUD:
     @pytest.mark.asyncio
     async def test_create_cookie(self, mock_app):
         site = _mock_site()
-        db = _mock_db_sequence(site)  # site found
+        db = _mock_db_sequence(site, None)  # site found, no existing duplicate
         async with await _client(mock_app, db) as client:
             resp = await client.post(
                 f"/api/v1/cookies/sites/{site.id}",

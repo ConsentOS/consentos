@@ -246,6 +246,72 @@ class TestScanService:
         db.add.assert_called_once()
 
 
+class TestSitesDueForScan:
+    """Test get_sites_due_for_scan: cron cadence + blank-schedule handling."""
+
+    # A fixed "now": 14:00 UTC, well after the 03:00 daily fire time.
+    NOW = datetime(2026, 6, 17, 14, 0, tzinfo=UTC)
+    DAILY_AT_3AM = "0 3 * * *"
+
+    def _site(self):
+        site = MagicMock()
+        site.id = uuid.uuid4()
+        return site
+
+    async def _run(self, rows, last_scan):
+        """Invoke get_sites_due_for_scan with a mocked DB and last-scan time.
+
+        ``last_scan`` is the time returned for every site in ``rows`` (or
+        None to simulate a site that has never been scanned).
+        """
+        from src.services import scanner
+
+        db = AsyncMock()
+        result = MagicMock()
+        result.all.return_value = rows
+        db.execute = AsyncMock(return_value=result)
+
+        times = {} if last_scan is None else {site.id: last_scan for site, _ in rows}
+        with patch.object(scanner, "_last_scan_times", new=AsyncMock(return_value=times)):
+            return await scanner.get_sites_due_for_scan(db, now=self.NOW)
+
+    @pytest.mark.asyncio
+    async def test_never_scanned_is_due(self):
+        site = self._site()
+        due = await self._run([(site, self.DAILY_AT_3AM)], last_scan=None)
+        assert due == [site]
+
+    @pytest.mark.asyncio
+    async def test_scanned_after_last_fire_not_due(self):
+        # Last scan at 05:00 today is after today's 03:00 fire — not due.
+        site = self._site()
+        last = datetime(2026, 6, 17, 5, 0, tzinfo=UTC)
+        due = await self._run([(site, self.DAILY_AT_3AM)], last_scan=last)
+        assert due == []
+
+    @pytest.mark.asyncio
+    async def test_scanned_before_last_fire_is_due(self):
+        # Last scan yesterday evening predates today's 03:00 fire — due.
+        site = self._site()
+        last = datetime(2026, 6, 16, 20, 0, tzinfo=UTC)
+        due = await self._run([(site, self.DAILY_AT_3AM)], last_scan=last)
+        assert due == [site]
+
+    @pytest.mark.asyncio
+    async def test_blank_cron_never_due(self):
+        # A non-NULL but blank schedule means "disabled" to the UI; it
+        # must not be treated as an active schedule.
+        site = self._site()
+        due = await self._run([(site, "   ")], last_scan=None)
+        assert due == []
+
+    @pytest.mark.asyncio
+    async def test_invalid_cron_skipped(self):
+        site = self._site()
+        due = await self._run([(site, "not a cron")], last_scan=None)
+        assert due == []
+
+
 # ── Router unit tests (mocked DB) ───────────────────────────────────
 
 

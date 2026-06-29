@@ -195,8 +195,10 @@ async def _mark_failed(db, job_uuid: uuid.UUID, message: str) -> None:
 def check_scheduled_scans() -> dict:
     """Periodic task: check which sites are due for a scheduled scan.
 
-    Runs every 15 minutes via Celery Beat. For each site with a
-    scan_schedule_cron, checks if a scan is overdue and triggers one.
+    Runs every 15 minutes via Celery Beat. ``get_sites_due_for_scan``
+    evaluates each site's ``scan_schedule_cron`` against its last scan, so
+    a site is only scanned once its cron has actually come due — not on
+    every tick. Blank/disabled schedules are ignored.
     """
     import asyncio
 

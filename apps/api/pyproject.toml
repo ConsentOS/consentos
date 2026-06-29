@@ -16,6 +16,7 @@ dependencies = [
     "bcrypt>=4.0,<5",
     "redis>=5.0,<6",
     "celery>=5.4,<6",
+    "croniter>=3.0,<6",
     "httpx>=0.28,<1",
     "structlog>=24.0,<25",
     "psycopg2-binary>=2.9,<3",
@@ -34,6 +35,7 @@ dev = [
     "httpx>=0.28,<1",
     "ruff>=0.9,<1",
     "mypy>=1.13,<2",
+    "types-croniter>=3.0,<6",
 ]
 
 [build-system]

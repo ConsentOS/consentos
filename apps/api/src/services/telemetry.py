@@ -147,7 +147,10 @@ async def _collect_features(
     ).scalar_one()
     scheduled = (
         await session.execute(
-            select(func.count(SiteConfig.id)).where(SiteConfig.scan_schedule_cron.isnot(None)),
+            select(func.count(SiteConfig.id)).where(
+                SiteConfig.scan_schedule_cron.isnot(None),
+                func.trim(SiteConfig.scan_schedule_cron) != "",
+            ),
         )
     ).scalar_one()
 

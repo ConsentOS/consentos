@@ -6,10 +6,11 @@ and cookie inventory synchronisation from scan results.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.cookie import Cookie, CookieCategory
@@ -20,6 +21,8 @@ from src.schemas.scanner import (
     DiffStatus,
     ScanDiffResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def create_scan_job(
@@ -316,24 +319,84 @@ async def sync_scan_results_to_cookies(
     return new_count
 
 
-async def get_sites_due_for_scan(db: AsyncSession) -> list[Site]:
-    """Find sites with a scan schedule that are due for scanning.
+async def _last_scan_times(
+    db: AsyncSession, site_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, datetime]:
+    """Map each site to the most recent moment a scan was kicked off.
 
-    A site is due when it has a scan_schedule_cron set and either has
-    never been scanned or the last scan completed before the schedule
-    interval. For simplicity, this checks the most recent scan's
-    completed_at against the current time minus a derived interval.
+    Uses ``started_at`` where present, falling back to ``created_at`` so
+    a job enqueued this beat tick but not yet started still counts —
+    otherwise the scheduler would stack a fresh job on every sweep until
+    the first one starts running. Sites with no scans are simply absent
+    from the result. Resolved in a single grouped query rather than one
+    per site.
     """
+    if not site_ids:
+        return {}
+    result = await db.execute(
+        select(
+            ScanJob.site_id,
+            func.max(func.coalesce(ScanJob.started_at, ScanJob.created_at)),
+        )
+        .where(ScanJob.site_id.in_(site_ids))
+        .group_by(ScanJob.site_id)
+    )
+    return {site_id: last_scan for site_id, last_scan in result.all()}
+
+
+async def get_sites_due_for_scan(db: AsyncSession, *, now: datetime | None = None) -> list[Site]:
+    """Find sites whose cron schedule has come due since their last scan.
+
+    A site qualifies when:
+
+      - its ``scan_schedule_cron`` is a valid, non-blank cron expression
+        (blank/whitespace means "disabled" — the admin UI renders an
+        empty value as *Disabled* — so it never qualifies), and
+      - the most recent scheduled fire time for that cron, at or before
+        ``now``, is later than the last scan we started — i.e. at least
+        one scheduled tick has elapsed that we haven't serviced yet.
+
+    This is what stops the every-15-minute beat sweep from re-scanning a
+    site on every tick regardless of its actual cadence, and stops legacy
+    empty-string schedules (non-NULL but "disabled" to the UI) from being
+    treated as active. Malformed expressions are skipped rather than
+    allowed to abort the whole sweep.
+    """
+    from croniter import croniter
+
     from src.models.site_config import SiteConfig
 
-    # Find sites with a cron schedule
+    now = now or datetime.now(UTC)
+
     result = await db.execute(
-        select(Site)
+        select(Site, SiteConfig.scan_schedule_cron)
         .join(SiteConfig, SiteConfig.site_id == Site.id)
         .where(
             Site.deleted_at.is_(None),
             Site.is_active.is_(True),
             SiteConfig.scan_schedule_cron.isnot(None),
+            func.trim(SiteConfig.scan_schedule_cron) != "",
         )
     )
-    return list(result.scalars().all())
+
+    # Keep only sites with a valid, non-blank cron, pairing each with its
+    # most recent scheduled fire time.
+    candidates: list[tuple[Site, datetime]] = []
+    for site, cron_expr in result.all():
+        expr = (cron_expr or "").strip()
+        if not croniter.is_valid(expr):
+            logger.warning("Skipping site %s: invalid scan_schedule_cron %r", site.id, expr)
+            continue
+        prev_fire = croniter(expr, now).get_prev(datetime)
+        candidates.append((site, prev_fire))
+
+    # One grouped query for all candidates rather than one per site.
+    last_scans = await _last_scan_times(db, [site.id for site, _ in candidates])
+
+    due: list[Site] = []
+    for site, prev_fire in candidates:
+        last_scan = last_scans.get(site.id)
+        if last_scan is None or last_scan < prev_fire:
+            due.append(site)
+
+    return due

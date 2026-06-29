@@ -14,6 +14,26 @@ export async function listCookies(
   return data;
 }
 
+export interface CookieCreatePayload {
+  name: string;
+  domain: string;
+  storage_type?: string;
+  category_id?: string | null;
+  vendor?: string | null;
+  description?: string | null;
+  path?: string | null;
+  same_site?: string | null;
+  max_age_seconds?: number | null;
+}
+
+export async function createCookie(
+  siteId: string,
+  body: CookieCreatePayload,
+): Promise<Cookie> {
+  const { data } = await apiClient.post<Cookie>(`/cookies/sites/${siteId}`, body);
+  return data;
+}
+
 export async function updateCookie(
   siteId: string,
   cookieId: string,

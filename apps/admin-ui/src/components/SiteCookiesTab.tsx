@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { getCookieSummary, listCategories, listCookies, updateCookie } from '../api/cookies';
 import type { Cookie, CookieCategory } from '../types/api';
+import AddCookieModal from './AddCookieModal';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
 import { EmptyState } from './ui/empty-state';
 import { LoadingState } from './ui/loading-state';
 import { MetricCard } from './ui/metric-card';
@@ -14,6 +17,7 @@ interface Props {
 
 export default function SiteCookiesTab({ siteId }: Props) {
   const queryClient = useQueryClient();
+  const [showAddModal, setShowAddModal] = useState(false);
 
   const { data: cookies, isLoading } = useQuery({
     queryKey: ['cookies', siteId],
@@ -45,6 +49,12 @@ export default function SiteCookiesTab({ siteId }: Props) {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="font-heading text-lg font-semibold text-foreground">Cookies</h2>
+        <Button onClick={() => setShowAddModal(true)}>Add cookie</Button>
+      </div>
+
       {/* Summary cards */}
       {summary && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -143,7 +153,11 @@ export default function SiteCookiesTab({ siteId }: Props) {
           </table>
         </div>
       ) : (
-        <EmptyState message="No cookies discovered yet. Run a scan or wait for client-side reporting." />
+        <EmptyState message="No cookies yet. Add one manually, run a scan, or wait for client-side reporting." />
+      )}
+
+      {showAddModal && (
+        <AddCookieModal siteId={siteId} onClose={() => setShowAddModal(false)} />
       )}
     </div>
   );

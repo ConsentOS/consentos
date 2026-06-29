@@ -128,6 +128,24 @@ async def create_cookie(
                 detail="Invalid category_id",
             )
 
+    # Enforce the (site_id, name, domain, storage_type) uniqueness up front
+    # so a manual duplicate returns a clean 409 instead of a flush-time
+    # IntegrityError → 500. The scanner/reporter paths upsert and never
+    # reach this endpoint, but the admin "Add cookie" form can.
+    existing = await db.execute(
+        select(Cookie).where(
+            Cookie.site_id == site_id,
+            Cookie.name == body.name,
+            Cookie.domain == body.domain,
+            Cookie.storage_type == body.storage_type,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cookie '{body.name}' on '{body.domain}' already exists for this site",
+        )
+
     cookie = Cookie(
         site_id=site_id,
         **body.model_dump(),
