@@ -591,3 +591,99 @@ class TestScanIntegration:
     async def test_list_scans_requires_auth(self, db_client):
         resp = await db_client.get(f"/api/v1/scanner/scans/site/{uuid.uuid4()}")
         assert resp.status_code in (401, 403)
+
+
+@requires_db
+class TestGetSitesDueForScan:
+    """Cron scheduling is respected. Regression: sites with a disabled
+    or empty schedule were being scanned every 15 minutes."""
+
+    async def _make_site(self, session, org_id, *, cron: str | None):
+        from src.models.site import Site as SiteModel
+        from src.models.site_config import SiteConfig
+
+        site = SiteModel(
+            id=uuid.uuid4(),
+            organisation_id=org_id,
+            domain=f"sched-{uuid.uuid4().hex[:8]}.com",
+            display_name="Scheduled site",
+            is_active=True,
+        )
+        session.add(site)
+        session.add(SiteConfig(site_id=site.id, scan_schedule_cron=cron))
+        await session.flush()
+        return site
+
+    async def test_disabled_and_empty_cron_are_never_due(self, _test_engine, test_org):
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from src.services.scanner import get_sites_due_for_scan
+
+        async with AsyncSession(_test_engine, expire_on_commit=False) as session:
+            disabled = await self._make_site(session, test_org.id, cron=None)
+            empty = await self._make_site(session, test_org.id, cron="")
+            await session.commit()
+
+            due_ids = {s.id for s in await get_sites_due_for_scan(session)}
+            assert disabled.id not in due_ids
+            assert empty.id not in due_ids
+
+    async def test_scheduled_never_scanned_is_due(self, _test_engine, test_org):
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from src.services.scanner import get_sites_due_for_scan
+
+        async with AsyncSession(_test_engine, expire_on_commit=False) as session:
+            site = await self._make_site(session, test_org.id, cron="0 3 * * *")
+            await session.commit()
+
+            due_ids = {s.id for s in await get_sites_due_for_scan(session)}
+            assert site.id in due_ids
+
+    async def test_recently_scanned_daily_site_is_not_due(self, _test_engine, test_org):
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from src.models.scan import ScanJob
+        from src.services.scanner import get_sites_due_for_scan
+
+        async with AsyncSession(_test_engine, expire_on_commit=False) as session:
+            site = await self._make_site(session, test_org.id, cron="0 3 * * *")
+            session.add(
+                ScanJob(
+                    id=uuid.uuid4(),
+                    site_id=site.id,
+                    status="completed",
+                    trigger="scheduled",
+                    completed_at=datetime.now(UTC) - timedelta(minutes=10),
+                )
+            )
+            await session.commit()
+
+            due_ids = {s.id for s in await get_sites_due_for_scan(session)}
+            assert site.id not in due_ids
+
+    async def test_stale_scan_makes_daily_site_due(self, _test_engine, test_org):
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from src.models.scan import ScanJob
+        from src.services.scanner import get_sites_due_for_scan
+
+        async with AsyncSession(_test_engine, expire_on_commit=False) as session:
+            site = await self._make_site(session, test_org.id, cron="0 3 * * *")
+            session.add(
+                ScanJob(
+                    id=uuid.uuid4(),
+                    site_id=site.id,
+                    status="completed",
+                    trigger="scheduled",
+                    completed_at=datetime.now(UTC) - timedelta(hours=25),
+                )
+            )
+            await session.commit()
+
+            due_ids = {s.id for s in await get_sites_due_for_scan(session)}
+            assert site.id in due_ids
