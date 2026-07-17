@@ -24,6 +24,7 @@ dependencies = [
     "markupsafe>=2.1,<3",
     "reportlab>=4.0,<5",
     "geoip2>=4.8,<5",
+    "croniter>=2.0,<4",
 ]
 
 [project.optional-dependencies]

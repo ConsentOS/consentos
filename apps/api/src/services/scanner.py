@@ -9,12 +9,14 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from croniter import croniter
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.cookie import Cookie, CookieCategory
 from src.models.scan import ScanJob, ScanResult
 from src.models.site import Site
+from src.models.site_config import SiteConfig
 from src.schemas.scanner import (
     CookieDiffItem,
     DiffStatus,
@@ -317,23 +319,41 @@ async def sync_scan_results_to_cookies(
 
 
 async def get_sites_due_for_scan(db: AsyncSession) -> list[Site]:
-    """Find sites with a scan schedule that are due for scanning.
+    """Sites whose next cron-scheduled scan is due at or before now.
 
-    A site is due when it has a scan_schedule_cron set and either has
-    never been scanned or the last scan completed before the schedule
-    interval. For simplicity, this checks the most recent scan's
-    completed_at against the current time minus a derived interval.
+    A site with no schedule (``NULL`` or empty ``scan_schedule_cron``)
+    is never due. A site with a schedule but no completed scan yet is
+    always due. Otherwise the next fire time is computed from the last
+    completed scan via croniter and compared to now.
     """
-    from src.models.site_config import SiteConfig
-
-    # Find sites with a cron schedule
-    result = await db.execute(
-        select(Site)
+    now = datetime.now(UTC)
+    last_scan = (
+        select(
+            ScanJob.site_id,
+            func.max(ScanJob.completed_at).label("last_completed_at"),
+        )
+        .where(ScanJob.status == "completed")
+        .group_by(ScanJob.site_id)
+        .subquery()
+    )
+    rows = await db.execute(
+        select(Site, SiteConfig.scan_schedule_cron, last_scan.c.last_completed_at)
         .join(SiteConfig, SiteConfig.site_id == Site.id)
+        .outerjoin(last_scan, last_scan.c.site_id == Site.id)
         .where(
             Site.deleted_at.is_(None),
             Site.is_active.is_(True),
             SiteConfig.scan_schedule_cron.isnot(None),
+            SiteConfig.scan_schedule_cron != "",
         )
     )
-    return list(result.scalars().all())
+
+    due: list[Site] = []
+    for site, cron, last_completed_at in rows.all():
+        try:
+            base = last_completed_at or datetime.fromtimestamp(0, tz=UTC)
+            if croniter(cron, base).get_next(datetime) <= now:
+                due.append(site)
+        except (ValueError, KeyError):
+            continue
+    return due
