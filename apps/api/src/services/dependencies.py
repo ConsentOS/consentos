@@ -1,12 +1,11 @@
-import uuid
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
 
+from src.extensions.registry import get_registry
 from src.schemas.auth import CurrentUser
-from src.services.auth import decode_token
+from src.services.auth_provider import get_default_provider
 
 bearer_scheme = HTTPBearer()
 
@@ -14,28 +13,9 @@ bearer_scheme = HTTPBearer()
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> CurrentUser:
-    """Extract and validate the current user from the JWT bearer token."""
-    try:
-        payload = decode_token(credentials.credentials)
-    except JWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from exc
-
-    if payload.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type",
-        )
-
-    return CurrentUser(
-        id=uuid.UUID(payload["sub"]),
-        organisation_id=uuid.UUID(payload["org_id"]),
-        email=payload.get("email", ""),
-        role=payload.get("role", "viewer"),
-    )
+    """Delegate to the registered auth provider, or the PG default."""
+    provider = get_registry().auth_provider or get_default_provider()
+    return await provider.verify_token(credentials.credentials)
 
 
 def require_role(*allowed_roles: str) -> Callable:

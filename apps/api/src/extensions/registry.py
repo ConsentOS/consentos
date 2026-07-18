@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
     from fastapi import APIRouter, FastAPI
 
+    from src.services.auth_provider import AuthProvider
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,7 @@ class ExtensionRegistry:
     )
     config_enrichers: list[Callable] = field(default_factory=list)
     consent_record_hooks: list[Callable] = field(default_factory=list)
+    auth_provider: AuthProvider | None = None
 
     # ------------------------------------------------------------------
     # Registration helpers
@@ -86,6 +89,13 @@ class ExtensionRegistry:
 
     def add_consent_record_hook(self, hook: Callable) -> None:
         self.consent_record_hooks.append(hook)
+
+    def set_auth_provider(self, provider: AuthProvider) -> None:
+        if self.auth_provider is not None:
+            raise RuntimeError(
+                "An auth provider is already registered; only one is allowed.",
+            )
+        self.auth_provider = provider
 
     # ------------------------------------------------------------------
     # Application wiring
@@ -176,6 +186,16 @@ def register_consent_record_hook(hook: Callable) -> None:
     (EE), writing audit logs, firing webhooks.
     """
     _registry.add_consent_record_hook(hook)
+
+
+def register_auth_provider(provider: AuthProvider) -> None:
+    """Register the authentication provider for this deployment.
+
+    Only one provider may be registered. Enterprise packages call this
+    at import time to replace the default ``PgAuthProvider``. If no
+    provider is registered, the default is used.
+    """
+    _registry.set_auth_provider(provider)
 
 
 # Discovery ------------------------------------------------------------------
