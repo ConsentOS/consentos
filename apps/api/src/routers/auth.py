@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import get_settings
 from src.db import get_db
+from src.extensions.registry import get_registry
 from src.models.user import User
 from src.schemas.auth import (
     ChangePasswordRequest,
@@ -17,7 +18,6 @@ from src.schemas.auth import (
     TokenResponse,
     UpdateProfileRequest,
 )
-from src.extensions.registry import get_registry
 from src.services.auth import (
     create_access_token,
     create_refresh_token,
