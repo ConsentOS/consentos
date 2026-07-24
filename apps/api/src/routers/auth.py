@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.settings import get_settings
 from src.db import get_db
+from src.extensions.registry import get_registry
 from src.models.user import User
 from src.schemas.auth import (
     ChangePasswordRequest,
@@ -29,8 +30,27 @@ from src.services.dependencies import get_current_user
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+async def _reject_when_external_provider_owns_interactive() -> None:
+    """Return 501 when the registered auth provider owns interactive flows.
+
+    Applied to ``/login``, ``/refresh``, ``/me/password``: routes an
+    external IdP (Clerk, Keycloak, etc.) handles itself. ``/me`` and
+    ``PATCH /me`` remain available in both modes.
+    """
+    provider = get_registry().auth_provider
+    if provider is not None and provider.owns_interactive_endpoints():
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Interactive authentication is handled by an external provider.",
+        )
+
+
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
+async def login(
+    body: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(_reject_when_external_provider_owns_interactive),
+) -> TokenResponse:
     """Authenticate a user with email and password, return JWT tokens."""
     result = await db.execute(
         select(User).where(User.email == body.email, User.deleted_at.is_(None))
@@ -66,6 +86,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
 async def refresh(
     body: RefreshRequest,
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(_reject_when_external_provider_owns_interactive),
 ) -> TokenResponse:
     """Exchange a valid refresh token for a new access/refresh token pair."""
     try:
@@ -165,6 +186,7 @@ async def change_password(
     body: ChangePasswordRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    _: None = Depends(_reject_when_external_provider_owns_interactive),
 ) -> None:
     """Change the current user's password. Requires the current password."""
     result = await db.execute(
