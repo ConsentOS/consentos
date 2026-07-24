@@ -79,6 +79,7 @@ import src.tasks.telemetry  # noqa: E402
 import src.tasks.update_check  # noqa: E402, F401
 
 try:
+    import ee.api.src.tasks.clerk_backfill
     import ee.api.src.tasks.compliance_scanner
     import ee.api.src.tasks.compliance_scoring
     import ee.api.src.tasks.retention  # noqa: F401
