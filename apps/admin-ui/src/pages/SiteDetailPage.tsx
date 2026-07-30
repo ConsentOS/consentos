@@ -5,6 +5,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { getSite, getSiteConfig, updateSiteConfig } from '../api/sites';
 import SiteCategoriesTab from '../components/SiteCategoriesTab';
 import SiteConfigTab from '../components/SiteConfigTab';
+import SiteDashboardTab from '../components/SiteDashboardTab';
 import SiteCookiesTab from '../components/SiteCookiesTab';
 import SiteOverviewTab from '../components/SiteOverviewTab';
 import BannerBuilderTab from '../components/BannerBuilderTab';
@@ -15,6 +16,7 @@ import { getSiteDetailTabs } from '../extensions/registry';
 
 const CORE_TABS: { id: string; label: string; order: number }[] = [
   { id: 'overview', label: 'Overview', order: 10 },
+  { id: 'dashboard', label: 'Dashboard', order: 15 },
   { id: 'config', label: 'Configuration', order: 20 },
   { id: 'categories', label: 'Categories', order: 25 },
   { id: 'cookies', label: 'Cookies', order: 30 },
@@ -96,6 +98,7 @@ export default function SiteDetailPage() {
 
       {/* Tab content — core tabs */}
       {activeTab === 'overview' && <SiteOverviewTab site={site} config={config ?? null} />}
+      {activeTab === 'dashboard' && siteId && <SiteDashboardTab siteId={siteId} />}
       {activeTab === 'config' && siteId && <SiteConfigTab siteId={siteId} config={config ?? null} />}
       {activeTab === 'categories' && siteId && (
         <SiteCategoriesTab siteId={siteId} config={config ?? null} />
