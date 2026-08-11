@@ -1,10 +1,17 @@
 """Tests for the dynamic CORS origin validation service."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.services.cors import extract_domain_from_origin, get_allowed_domains, is_origin_allowed
+from src.services.cors import (
+    extract_domain_from_origin,
+    get_allowed_domains,
+    get_allowed_domains_cached,
+    invalidate_allowed_domains_cache,
+    is_origin_allowed,
+)
 
 
 class TestExtractDomainFromOrigin:
@@ -220,3 +227,92 @@ class TestGetAllowedDomains:
 
         domains = await get_allowed_domains(db)
         assert domains == set()
+
+
+class _FakeRedis:
+    """Minimal async Redis stand-in: get / set / delete on an in-memory dict."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> None:
+        self.store[key] = value
+
+    async def delete(self, key: str) -> None:
+        self.store.pop(key, None)
+
+
+class TestAllowedDomainsCache:
+    """The Redis-backed cache that powers the dynamic CORS middleware."""
+
+    def setup_method(self) -> None:
+        import src.services.cors as cors_module
+
+        cors_module._redis = None
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_database(self, monkeypatch):
+        fake = _FakeRedis()
+        fake.store["cmp:cors:allowed_domains"] = json.dumps(["example.com"])
+        monkeypatch.setattr("src.services.cors._get_redis", lambda: fake)
+
+        async def fake_fetch() -> set[str]:
+            raise AssertionError("database must not be read on a cache hit")
+
+        monkeypatch.setattr("src.services.cors._fetch_allowed_domains", fake_fetch)
+
+        result = await get_allowed_domains_cached(ttl=60)
+        assert result == {"example.com"}
+
+    @pytest.mark.asyncio
+    async def test_cache_miss_reads_db_and_writes_back(self, monkeypatch):
+        fake = _FakeRedis()
+        monkeypatch.setattr("src.services.cors._get_redis", lambda: fake)
+
+        async def fake_fetch() -> set[str]:
+            return {"example.com", "other.com"}
+
+        monkeypatch.setattr("src.services.cors._fetch_allowed_domains", fake_fetch)
+
+        result = await get_allowed_domains_cached(ttl=60)
+        assert result == {"example.com", "other.com"}
+        stored = fake.store.get("cmp:cors:allowed_domains")
+        assert stored is not None
+        assert set(json.loads(stored)) == {"example.com", "other.com"}
+
+    @pytest.mark.asyncio
+    async def test_invalidate_deletes_cache_key(self, monkeypatch):
+        fake = _FakeRedis()
+        fake.store["cmp:cors:allowed_domains"] = json.dumps(["example.com"])
+        monkeypatch.setattr("src.services.cors._get_redis", lambda: fake)
+
+        await invalidate_allowed_domains_cache()
+        assert "cmp:cors:allowed_domains" not in fake.store
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_db_when_redis_unavailable(self, monkeypatch):
+        monkeypatch.setattr("src.services.cors._get_redis", lambda: None)
+
+        async def fake_fetch() -> set[str]:
+            return {"example.com"}
+
+        monkeypatch.setattr("src.services.cors._fetch_allowed_domains", fake_fetch)
+
+        result = await get_allowed_domains_cached(ttl=60)
+        assert result == {"example.com"}
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_set_when_db_fails_on_miss(self, monkeypatch):
+        # Empty fake Redis → cache miss → database failure must not raise.
+        monkeypatch.setattr("src.services.cors._get_redis", lambda: _FakeRedis())
+
+        async def fake_fetch() -> set[str]:
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr("src.services.cors._fetch_allowed_domains", fake_fetch)
+
+        result = await get_allowed_domains_cached(ttl=60)
+        assert result == set()
