@@ -23,6 +23,7 @@ from src.schemas.site import (
     SiteUpdate,
 )
 from src.services.config_resolver import orm_to_config_dict, resolve_config
+from src.services.cors import invalidate_allowed_domains_cache
 from src.services.dependencies import require_role
 
 router = APIRouter(prefix="/sites", tags=["sites"])
@@ -66,6 +67,7 @@ async def create_site(
     db.add(default_config)
     await db.flush()
 
+    await invalidate_allowed_domains_cache()
     await db.refresh(site)
     return site
 
@@ -113,6 +115,7 @@ async def update_site(
         setattr(site, field, value)
 
     await db.flush()
+    await invalidate_allowed_domains_cache()
     await db.refresh(site)
     return site
 
@@ -127,6 +130,7 @@ async def deactivate_site(
     site = await _get_org_site(site_id, current_user.organisation_id, db)
     site.deleted_at = datetime.now(UTC)
     await db.flush()
+    await invalidate_allowed_domains_cache()
 
 
 # ── Site config CRUD ─────────────────────────────────────────────────

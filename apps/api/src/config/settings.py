@@ -40,6 +40,9 @@ class Settings(BaseSettings):
         """Parse allowed_origins as a comma-separated string."""
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
+    # TTL of the Redis cache of registered site domains (allowed dynamically).
+    cors_cache_ttl: int = 30
+
     # Database
     database_url: str = "postgresql+asyncpg://consentos:consentos@localhost:5432/consentos"
     database_echo: bool = False
