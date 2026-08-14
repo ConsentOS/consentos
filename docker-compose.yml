@@ -60,6 +60,9 @@ services:
       PORT: "8001"
       LOG_LEVEL: INFO
       CRAWLER_HEADLESS: "true"
+      # CRAWLER_WAIT_UNTIL: "domcontentloaded" # replaces the discouraged "networkidle"
+      # CRAWLER_SETTLE_MAX_MS: "15000"     # hard cap on the cookie settle wait
+      # CRAWLER_STABLE_WINDOW_MS: "2000"   # stability window before collecting
     depends_on:
       - api
     restart: unless-stopped
