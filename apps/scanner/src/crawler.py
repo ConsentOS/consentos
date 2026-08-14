@@ -2,10 +2,11 @@
 
 For each URL: launches headless Chromium, **pre-seeds an
 "all categories accepted" ConsentOS consent cookie**, clears any other
-cookies, navigates, waits for network idle, enumerates
-``document.cookie`` / ``localStorage`` / ``sessionStorage``, captures
-``Set-Cookie`` headers from network requests, and attributes cookies
-to source scripts via the request chain.
+cookies, navigates (``domcontentloaded``), waits for cookie deposition to
+settle (see :meth:`CookieCrawler._wait_for_cookies_to_settle`),
+enumerates ``document.cookie`` / ``localStorage`` / ``sessionStorage``,
+captures ``Set-Cookie`` headers from network requests, and attributes
+cookies to source scripts via the request chain.
 
 The pre-seed is what makes the scan useful: without it the loader
 would block analytics/marketing scripts and the scan would only see
@@ -154,11 +155,21 @@ class CookieCrawler:
         timeout_ms: int = 30_000,
         user_agent: str = _DEFAULT_USER_AGENT,
         proxy: ProxyConfig | None = None,
+        wait_until: str = "domcontentloaded",
+        min_settle_ms: int = 2_000,
+        stable_window_ms: int = 2_000,
+        settle_max_ms: int = 15_000,
+        poll_interval_ms: int = 500,
     ) -> None:
         self._headless = headless
         self._timeout_ms = timeout_ms
         self._user_agent = user_agent
         self._proxy = proxy
+        self._wait_until = wait_until
+        self._min_settle_ms = min_settle_ms
+        self._stable_window_ms = stable_window_ms
+        self._settle_max_ms = settle_max_ms
+        self._poll_interval_ms = poll_interval_ms
 
     async def crawl_site(
         self,
@@ -192,6 +203,49 @@ class CookieCrawler:
                 await browser.close()
 
         return result
+
+    async def _wait_for_cookies_to_settle(
+        self,
+        page: Page,
+        context: BrowserContext,
+    ) -> list[dict]:
+        """Wait until the browser cookie jar stops changing.
+
+        Replaces the previous ``wait_until="networkidle"`` strategy, which
+        never resolves for sites that hold persistent network connections
+        open (analytics polling, SSE/EventSource, websockets, ad exchanges —
+        e.g. most WordPress sites with common plugins) and so timed the
+        whole crawl out at the navigation ceiling. We do not need network
+        idle; we need *cookie* idle — enough elapsed time for third-party
+        scripts (GA, GTM, ads) to execute and deposit their cookies, then a
+        stability window confirming nothing new is arriving.
+
+        Polls ``context.cookies()`` every ``poll_interval_ms``. After the
+        ``min_settle_ms`` grace floor has elapsed, returns once the set of
+        ``(name, domain)`` pairs has been stable for ``stable_window_ms``.
+        Hard-capped at ``settle_max_ms`` so a page that keeps setting new
+        cookies forever (rotating A/B tokens, etc.) can't stall the crawl.
+        Returns the final cookie list seen.
+        """
+        elapsed = 0
+        stable_for = 0
+        last_signature: set[tuple[str, str]] | None = None
+        cookies: list[dict] = await context.cookies()
+
+        while elapsed < self._settle_max_ms:
+            await page.wait_for_timeout(self._poll_interval_ms)
+            elapsed += self._poll_interval_ms
+            cookies = await context.cookies()
+            signature = {(c.get("name", ""), c.get("domain", "")) for c in cookies}
+            if last_signature is not None and signature == last_signature:
+                stable_for += self._poll_interval_ms
+                if elapsed >= self._min_settle_ms and stable_for >= self._stable_window_ms:
+                    return cookies
+            else:
+                stable_for = 0
+            last_signature = signature
+
+        return cookies  # Cap reached — return whatever we last saw.
 
     async def _crawl_page(
         self,
@@ -285,36 +339,27 @@ class CookieCrawler:
 
             page.on("response", _on_response)
 
-            # Navigate — networkidle waits until ≤2 active connections for
-            # 500ms, which catches the GA beacon round-trip that
-            # domcontentloaded misses.
-            await page.goto(url, wait_until="networkidle", timeout=self._timeout_ms)
-            # Safety margin for late-firing scripts (e.g. deferred GTM tags).
-            await page.wait_for_timeout(5000)
+            # Navigate — "domcontentloaded" resolves as soon as the HTML is
+            # parsed. The previous "networkidle" strategy waits for ≤2
+            # network connections for 500ms and never resolves on sites that
+            # hold persistent connections open (analytics polling,
+            # SSE/EventSource, websockets, ad exchanges — e.g. many WordPress
+            # sites), timing the whole crawl out at the navigation ceiling.
+            # We don't need network idle; we need cookie idle — see
+            # _wait_for_cookies_to_settle.
+            await page.goto(url, wait_until=self._wait_until, timeout=self._timeout_ms)
 
-            # First pass — enumerate browser cookies via CDP.
-            cdp_cookies = await context.cookies()
+            # Let third-party scripts (GA, GTM, ads) execute and deposit
+            # their cookies, then collect once deposition has settled.
+            cdp_cookies = await self._wait_for_cookies_to_settle(page, context)
 
-            # Second pass — wait a further 2 seconds for any delayed
-            # Set-Cookie headers, then merge newly appeared cookies.
-            await page.wait_for_timeout(2000)
-            delayed_cookies = await context.cookies()
-
-            # Merge: index first-pass cookies by (name, domain), then
-            # add any that only appeared in the second pass.
+            # Index the final cookie set by (name, domain) for the
+            # header-only merge below.
             seen_keys: set[tuple[str, str]] = set()
-            all_cdp_cookies: list[dict] = []
             for c in cdp_cookies:
-                key = (c["name"], c["domain"])
-                seen_keys.add(key)
-                all_cdp_cookies.append(c)
-            for c in delayed_cookies:
-                key = (c["name"], c["domain"])
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    all_cdp_cookies.append(c)
+                seen_keys.add((c["name"], c["domain"]))
 
-            for c in all_cdp_cookies:
+            for c in cdp_cookies:
                 result.cookies.append(
                     DiscoveredCookie(
                         name=c["name"],
