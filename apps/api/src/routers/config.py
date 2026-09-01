@@ -9,9 +9,11 @@ from src.extensions.registry import get_registry
 from src.models.cookie import Cookie, CookieAllowListEntry, CookieCategory
 from src.models.iab_gvl import IabGvlMeta
 from src.models.org_config import OrgConfig
+from src.models.org_translation import OrgTranslation
 from src.models.site import Site
 from src.models.site_config import SiteConfig
 from src.models.site_group_config import SiteGroupConfig
+from src.models.site_group_translation import SiteGroupTranslation
 from src.models.translation import Translation
 from src.schemas.auth import CurrentUser
 from src.schemas.site import SiteConfigResponse
@@ -24,6 +26,7 @@ from src.services.config_resolver import (
 from src.services.dependencies import require_role
 from src.services.geoip import detect_region
 from src.services.publisher import publish_site_config
+from src.services.translation_resolver import resolve_translation, resolve_translation_sources
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -226,40 +229,75 @@ async def get_geo_resolved_config(
     # than issuing a second request. The banner sends its detected locale
     # as ?locale=, so only the relevant translation is returned (keeping
     # the response small and the cache key site + country + locale).
-    public["translations"] = await _load_site_translation(site_id, locale, db)
+    public["translations"] = await _load_resolved_translation(
+        site_id, org_id, group_id, locale, db
+    )
 
     return public
 
 
-async def _load_site_translation(
-    site_id: uuid.UUID, locale: str | None, db: AsyncSession
+async def _load_resolved_translation(
+    site_id: uuid.UUID,
+    org_id: uuid.UUID | None,
+    group_id: uuid.UUID | None,
+    locale: str | None,
+    db: AsyncSession,
 ) -> dict[str, dict[str, str]]:
-    """Load a single locale's translation strings for a site.
+    """Resolve a single locale's translation strings across the cascade.
 
-    Returns a single-entry ``{locale: strings}`` map for the requested
-    locale, falling back to the base language (``en-us`` -> ``en``).
-    Empty when no locale is requested or none matches, so the banner
-    uses its built-in English defaults. Keyed by the requested locale so
-    the banner's client-side lookup hits regardless of how it matched.
+    Merges Org -> Site Group -> Site translations key-by-key (see
+    ``translation_resolver.resolve_translation``) so an operator can
+    define common strings once at org level and override only the few
+    that differ at group/site level. Returns a single-entry
+    ``{locale: strings}`` map keyed by the *requested* locale, so the
+    banner's client-side lookup hits regardless of which layer matched
+    via base-language fallback. Empty when no locale is requested or
+    nothing matches at any layer, so the banner uses its built-in
+    English defaults.
     """
     if not locale:
         return {}
-    requested = locale.lower()
-    candidates = [requested]
-    base = requested.split("-")[0]
-    if base != requested:
-        candidates.append(base)
+    org_rows = await _load_org_translation_rows(org_id, db) if org_id else {}
+    group_rows = await _load_group_translation_rows(group_id, db) if group_id else {}
+    site_rows = await _load_site_translation_rows(site_id, db)
+    merged = resolve_translation(
+        locale, org_rows=org_rows, group_rows=group_rows, site_rows=site_rows
+    )
+    return {locale.lower(): merged} if merged else {}
+
+
+async def _load_org_translation_rows(
+    organisation_id: uuid.UUID, db: AsyncSession
+) -> dict[str, dict[str, str]]:
+    """Load every locale's translation strings for an organisation."""
     result = await db.execute(
-        select(Translation.locale, Translation.strings).where(
-            Translation.site_id == site_id,
-            func.lower(Translation.locale).in_(candidates),
+        select(OrgTranslation.locale, OrgTranslation.strings).where(
+            OrgTranslation.organisation_id == organisation_id
         )
     )
-    rows = {loc.lower(): strings for loc, strings in result.all()}
-    for candidate in candidates:
-        if candidate in rows:
-            return {requested: rows[candidate]}
-    return {}
+    return {loc.lower(): strings for loc, strings in result.all()}
+
+
+async def _load_group_translation_rows(
+    group_id: uuid.UUID, db: AsyncSession
+) -> dict[str, dict[str, str]]:
+    """Load every locale's translation strings for a site group."""
+    result = await db.execute(
+        select(SiteGroupTranslation.locale, SiteGroupTranslation.strings).where(
+            SiteGroupTranslation.site_group_id == group_id
+        )
+    )
+    return {loc.lower(): strings for loc, strings in result.all()}
+
+
+async def _load_site_translation_rows(
+    site_id: uuid.UUID, db: AsyncSession
+) -> dict[str, dict[str, str]]:
+    """Load every locale's translation strings for a site."""
+    result = await db.execute(
+        select(Translation.locale, Translation.strings).where(Translation.site_id == site_id)
+    )
+    return {loc.lower(): strings for loc, strings in result.all()}
 
 
 @router.get("/sites/{site_id}/cookies")
@@ -450,6 +488,51 @@ async def get_config_inheritance(
         "site_id": str(site_id),
         "site_group_id": str(group_id) if group_id else None,
         "fields": sources,
+    }
+
+
+@router.get("/sites/{site_id}/translations/{locale}/inheritance")
+async def get_translation_inheritance(
+    site_id: uuid.UUID,
+    locale: str,
+    current_user: CurrentUser = Depends(require_role("owner", "admin", "editor", "viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the per-key translation inheritance chain for a site's locale.
+
+    Shows which level (org, group, or site) each translation key comes
+    from, mirroring ``get_config_inheritance``'s shape but keyed by
+    translation key instead of config field.
+    """
+    result = await db.execute(
+        select(SiteConfig)
+        .join(Site)
+        .where(
+            SiteConfig.site_id == site_id,
+            Site.organisation_id == current_user.organisation_id,
+            Site.deleted_at.is_(None),
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site configuration not found",
+        )
+
+    group_id = await _get_site_group_id(site_id, db)
+    org_rows = await _load_org_translation_rows(current_user.organisation_id, db)
+    group_rows = await _load_group_translation_rows(group_id, db) if group_id else {}
+    site_rows = await _load_site_translation_rows(site_id, db)
+
+    keys = resolve_translation_sources(
+        locale, org_rows=org_rows, group_rows=group_rows, site_rows=site_rows
+    )
+
+    return {
+        "site_id": str(site_id),
+        "site_group_id": str(group_id) if group_id else None,
+        "locale": locale,
+        "keys": keys,
     }
 
 

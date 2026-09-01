@@ -30,3 +30,6 @@ class SiteGroup(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     group_config: Mapped["SiteGroupConfig | None"] = relationship(  # noqa: F821
         back_populates="site_group", uselist=False
     )
+    site_group_translations: Mapped[list["SiteGroupTranslation"]] = relationship(  # noqa: F821
+        back_populates="site_group"
+    )

@@ -254,6 +254,10 @@ class TestConfigRoutes:
         routes = list(app.openapi()["paths"])
         assert "/api/v1/config/sites/{site_id}/inheritance" in routes
 
+    def test_translation_inheritance_route_registered(self, app):
+        routes = list(app.openapi()["paths"])
+        assert "/api/v1/config/sites/{site_id}/translations/{locale}/inheritance" in routes
+
     @pytest.mark.asyncio
     async def test_publish_requires_auth(self, client):
         site_id = uuid.uuid4()

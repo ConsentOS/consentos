@@ -24,3 +24,6 @@ class Organisation(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     org_config: Mapped["OrgConfig | None"] = relationship(  # noqa: F821
         back_populates="organisation", uselist=False
     )
+    org_translations: Mapped[list["OrgTranslation"]] = relationship(  # noqa: F821
+        back_populates="organisation"
+    )

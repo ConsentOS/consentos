@@ -20,9 +20,11 @@ from src.routers import (
     hosted_pages,
     iab_gvl,
     org_config,
+    org_translations,
     organisations,
     scanner,
     site_group_config,
+    site_group_translations,
     site_groups,
     sites,
     system,
@@ -138,9 +140,11 @@ def create_app() -> FastAPI:
     app.include_router(compliance.router, prefix=api_prefix)
     app.include_router(organisations.router, prefix=api_prefix)
     app.include_router(org_config.router, prefix=api_prefix)
+    app.include_router(org_translations.router, prefix=api_prefix)
     app.include_router(users.router, prefix=api_prefix)
     app.include_router(site_groups.router, prefix=api_prefix)
     app.include_router(site_group_config.router, prefix=api_prefix)
+    app.include_router(site_group_translations.router, prefix=api_prefix)
     app.include_router(sites.router, prefix=api_prefix)
     app.include_router(cookies.router, prefix=api_prefix)
     app.include_router(iab_gvl.router, prefix=api_prefix)
