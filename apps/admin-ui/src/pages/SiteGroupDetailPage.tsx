@@ -6,6 +6,7 @@ import { useParams } from 'react-router-dom';
 import { getSiteGroup } from '../api/site-groups';
 import { getSiteGroupConfig, updateSiteGroupConfig } from '../api/site-group-config';
 import BannerBuilderTab from '../components/BannerBuilderTab';
+import SiteGroupTranslationsTab from '../components/SiteGroupTranslationsTab';
 import { Alert } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
@@ -31,7 +32,7 @@ const GPC_JURISDICTIONS = [
   { value: 'US-MT', label: 'Montana (MTCDPA)' },
 ];
 
-type Tab = 'configuration' | 'banner';
+type Tab = 'configuration' | 'banner' | 'translations';
 
 export default function SiteGroupDetailPage() {
   const { groupId } = useParams<{ groupId: string }>();
@@ -153,6 +154,7 @@ export default function SiteGroupDetailPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'configuration', label: 'Configuration' },
     { key: 'banner', label: 'Banner' },
+    { key: 'translations', label: 'Translations' },
   ];
 
   return (
@@ -458,6 +460,8 @@ export default function SiteGroupDetailPage() {
             onSave={(body) => updateSiteGroupConfig(groupId, body)}
           />
         )}
+
+        {activeTab === 'translations' && groupId && <SiteGroupTranslationsTab groupId={groupId} />}
       </div>
     </div>
   );

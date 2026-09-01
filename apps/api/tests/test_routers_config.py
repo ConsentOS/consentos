@@ -213,9 +213,10 @@ class TestGeoResolvedConfig:
         )
         # Geo-resolved queries: config, site org_id, org_config,
         # site group_id, gvl meta, category-purpose mapping, cookie count,
-        # the requested locale's translation.
+        # org translation rows, (group skipped — no group_id), site
+        # translation rows.
         db = _mock_db_sequence(
-            config, ORG_ID, None, None, None, [], 0, [("de", {"title": "Wir verwenden Cookies"})]
+            config, ORG_ID, None, None, None, [], 0, [], [("de", {"title": "Wir verwenden Cookies"})]
         )
         async with await _client(mock_app, db) as client:
             resp = await client.get(
@@ -238,7 +239,7 @@ class TestGeoResolvedConfig:
         # Stored locale is ``de``; the visitor asks for ``de-de`` and the
         # base language matches. Result is keyed by the requested locale.
         db = _mock_db_sequence(
-            config, ORG_ID, None, None, None, [], 0, [("de", {"title": "Wir verwenden Cookies"})]
+            config, ORG_ID, None, None, None, [], 0, [], [("de", {"title": "Wir verwenden Cookies"})]
         )
         async with await _client(mock_app, db) as client:
             resp = await client.get(
@@ -253,7 +254,7 @@ class TestGeoResolvedConfig:
         config = _mock_config(regional_modes={"DEFAULT": "opt_in"})
         # Requested locale has no stored translation — banner falls back
         # to its built-in English defaults.
-        db = _mock_db_sequence(config, ORG_ID, None, None, None, [], 0, [])
+        db = _mock_db_sequence(config, ORG_ID, None, None, None, [], 0, [], [])
         async with await _client(mock_app, db) as client:
             resp = await client.get(
                 f"/api/v1/config/sites/{config.site_id}/geo-resolved",
@@ -288,6 +289,41 @@ class TestGeoResolvedConfig:
         assert data["translations"] == {}
 
     @pytest.mark.asyncio
+    async def test_get_geo_resolved_config_merges_org_group_site_translations(self, mock_app):
+        """Org, group, and site translations merge key-by-key per locale."""
+        group_id = uuid.uuid4()
+        config = _mock_config(regional_modes={"DEFAULT": "opt_in"})
+        # Geo-resolved queries: config, site org_id, org_config, site
+        # group_id, group_config (group_id is set), gvl meta,
+        # category-purpose mapping, cookie count, org translation rows,
+        # group translation rows (group_id is set), site translation rows.
+        db = _mock_db_sequence(
+            config,
+            ORG_ID,
+            None,
+            group_id,
+            None,
+            None,
+            [],
+            0,
+            [("fr", {"title": "Org title", "acceptAll": "Org accept"})],
+            [("fr", {"acceptAll": "Group accept"})],
+            [("fr", {"title": "Site title"})],
+        )
+        async with await _client(mock_app, db) as client:
+            resp = await client.get(
+                f"/api/v1/config/sites/{config.site_id}/geo-resolved",
+                params={"locale": "fr"},
+            )
+        assert resp.status_code == 200
+        # Site wins for "title" (its own override); group wins for
+        # "acceptAll" since the site never redefines it, shadowing org's
+        # value for that key. No layer replaces the other wholesale.
+        assert resp.json()["translations"] == {
+            "fr": {"title": "Site title", "acceptAll": "Group accept"}
+        }
+
+    @pytest.mark.asyncio
     async def test_get_geo_resolved_config_not_found(self, mock_app):
         db = _mock_db_sequence(None)
         async with await _client(mock_app, db) as client:
@@ -319,6 +355,43 @@ class TestGeoResolvedConfig:
         data = resp.json()
         assert data["detected_country"] is None
         assert data["detected_region"] is None
+
+
+class TestTranslationInheritance:
+    @pytest.mark.asyncio
+    async def test_get_translation_inheritance(self, mock_app):
+        config = _mock_config()
+        # Queries: site config existence check, site group_id, org
+        # translation rows, (group skipped — no group_id), site
+        # translation rows.
+        db = _mock_db_sequence(
+            config,
+            None,
+            [("fr", {"title": "Org title"})],
+            [("fr", {"acceptAll": "Site accept"})],
+        )
+        async with await _client(mock_app, db) as client:
+            resp = await client.get(
+                f"/api/v1/config/sites/{config.site_id}/translations/fr/inheritance",
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["locale"] == "fr"
+        assert data["keys"]["title"]["source"] == "org"
+        assert data["keys"]["title"]["resolved_value"] == "Org title"
+        assert data["keys"]["acceptAll"]["source"] == "site"
+        assert data["keys"]["rejectAll"]["source"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_get_translation_inheritance_not_found(self, mock_app):
+        db = _mock_db_sequence(None)
+        async with await _client(mock_app, db) as client:
+            resp = await client.get(
+                f"/api/v1/config/sites/{uuid.uuid4()}/translations/fr/inheritance",
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == 404
 
 
 class TestVisitorGeo:
