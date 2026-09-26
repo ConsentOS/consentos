@@ -6,26 +6,41 @@
  * `setTrackingConsent()` with the mapped consent state whenever
  * the visitor makes a consent choice.
  *
+ * The API is asymmetric and this is the source of most integration
+ * bugs: `setTrackingConsent()` accepts booleans, while
+ * `currentVisitorConsent()` returns `'yes' | 'no' | ''` strings. Passing
+ * a string to the setter is not a type error at runtime and not a
+ * validation failure either, because `'no'` is truthy, so a rejection is
+ * recorded as a grant.
+ *
  * @see https://shopify.dev/docs/api/customer-privacy
  */
 
 import type { CategorySlug } from './types';
 
-/** Shopify consent values: empty = unknown, 'yes' = granted, 'no' = denied. */
-type ShopifyConsent = '' | 'yes' | 'no';
+/** Values `currentVisitorConsent()` reports: '' = undecided. */
+export type ShopifyConsentValue = '' | 'yes' | 'no';
 
-/** The consent object Shopify expects. */
+/** What `setTrackingConsent()` accepts. Booleans, not strings. */
 export interface ShopifyTrackingConsent {
-  analytics: ShopifyConsent;
-  marketing: ShopifyConsent;
-  preferences: ShopifyConsent;
-  sale_of_data: ShopifyConsent;
+  analytics: boolean;
+  marketing: boolean;
+  preferences: boolean;
+  sale_of_data: boolean;
+}
+
+/** What `currentVisitorConsent()` returns. */
+export interface ShopifyVisitorConsent {
+  analytics: ShopifyConsentValue;
+  marketing: ShopifyConsentValue;
+  preferences: ShopifyConsentValue;
+  sale_of_data: ShopifyConsentValue;
 }
 
 /** Shape of window.Shopify.customerPrivacy when loaded. */
 interface ShopifyCustomerPrivacy {
   setTrackingConsent: (consent: ShopifyTrackingConsent, callback?: () => void) => void;
-  currentVisitorConsent: () => ShopifyTrackingConsent;
+  currentVisitorConsent: () => ShopifyVisitorConsent;
   analyticsProcessingAllowed: () => boolean;
   marketingAllowed: () => boolean;
   preferencesProcessingAllowed: () => boolean;
@@ -58,14 +73,16 @@ export function isShopifyPrivacyAvailable(): boolean {
  *   analytics     → analytics
  *   marketing     → marketing + sale_of_data
  *   personalisation → sale_of_data (if marketing not already accepted)
+ *
+ * The sale_of_data mapping is under review: deriving a CPRA opt-out flag
+ * from an opt-in category can reverse an opt-out made elsewhere.
  */
 export function buildShopifyConsent(accepted: CategorySlug[]): ShopifyTrackingConsent {
   return {
-    preferences: accepted.includes('functional') ? 'yes' : 'no',
-    analytics: accepted.includes('analytics') ? 'yes' : 'no',
-    marketing: accepted.includes('marketing') ? 'yes' : 'no',
-    sale_of_data:
-      accepted.includes('marketing') || accepted.includes('personalisation') ? 'yes' : 'no',
+    preferences: accepted.includes('functional'),
+    analytics: accepted.includes('analytics'),
+    marketing: accepted.includes('marketing'),
+    sale_of_data: accepted.includes('marketing') || accepted.includes('personalisation'),
   };
 }
 

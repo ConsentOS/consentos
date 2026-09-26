@@ -1,12 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildShopifyConsent, isShopifyPrivacyAvailable, updateShopifyConsent } from '../shopify';
+import type { ShopifyVisitorConsent } from '../shopify';
 import type { CategorySlug } from '../types';
+
+const UNDECIDED: ShopifyVisitorConsent = {
+  analytics: '',
+  marketing: '',
+  preferences: '',
+  sale_of_data: '',
+};
 
 describe('shopify', () => {
   const mockSetTrackingConsent = vi.fn();
-  const mockCurrentVisitorConsent = vi.fn();
+  const mockCurrentVisitorConsent = vi.fn(() => ({ ...UNDECIDED }));
 
   beforeEach(() => {
+    mockCurrentVisitorConsent.mockReturnValue({ ...UNDECIDED });
     (window as any).Shopify = {
       customerPrivacy: {
         setTrackingConsent: mockSetTrackingConsent,
@@ -42,62 +51,70 @@ describe('shopify', () => {
   });
 
   describe('buildShopifyConsent', () => {
-    it('maps accept all to all yes', () => {
-      const accepted: CategorySlug[] = ['necessary', 'functional', 'analytics', 'marketing', 'personalisation'];
-      const result = buildShopifyConsent(accepted);
-      expect(result).toEqual({
-        preferences: 'yes',
-        analytics: 'yes',
-        marketing: 'yes',
-        sale_of_data: 'yes',
+    it('emits booleans, never strings', () => {
+      // setTrackingConsent takes booleans. 'no' is truthy, so a string
+      // rejection is read as a grant.
+      const result = buildShopifyConsent(['necessary']);
+      for (const value of Object.values(result)) {
+        expect(typeof value).toBe('boolean');
+      }
+    });
+
+    it('maps accept all', () => {
+      const accepted: CategorySlug[] = [
+        'necessary',
+        'functional',
+        'analytics',
+        'marketing',
+        'personalisation',
+      ];
+      expect(buildShopifyConsent(accepted)).toEqual({
+        preferences: true,
+        analytics: true,
+        marketing: true,
+        sale_of_data: true,
       });
     });
 
-    it('maps reject all (necessary only) to all no', () => {
-      const accepted: CategorySlug[] = ['necessary'];
-      const result = buildShopifyConsent(accepted);
-      expect(result).toEqual({
-        preferences: 'no',
-        analytics: 'no',
-        marketing: 'no',
-        sale_of_data: 'no',
+    it('maps reject all (necessary only)', () => {
+      expect(buildShopifyConsent(['necessary'])).toEqual({
+        preferences: false,
+        analytics: false,
+        marketing: false,
+        sale_of_data: false,
       });
     });
 
     it('maps functional to preferences', () => {
-      const accepted: CategorySlug[] = ['necessary', 'functional'];
-      const result = buildShopifyConsent(accepted);
-      expect(result.preferences).toBe('yes');
-      expect(result.analytics).toBe('no');
-      expect(result.marketing).toBe('no');
+      const result = buildShopifyConsent(['necessary', 'functional']);
+      expect(result.preferences).toBe(true);
+      expect(result.analytics).toBe(false);
+      expect(result.marketing).toBe(false);
     });
 
     it('maps personalisation to sale_of_data', () => {
-      const accepted: CategorySlug[] = ['necessary', 'personalisation'];
-      const result = buildShopifyConsent(accepted);
-      expect(result.sale_of_data).toBe('yes');
-      expect(result.marketing).toBe('no');
+      const result = buildShopifyConsent(['necessary', 'personalisation']);
+      expect(result.sale_of_data).toBe(true);
+      expect(result.marketing).toBe(false);
     });
 
     it('maps marketing to both marketing and sale_of_data', () => {
-      const accepted: CategorySlug[] = ['necessary', 'marketing'];
-      const result = buildShopifyConsent(accepted);
-      expect(result.marketing).toBe('yes');
-      expect(result.sale_of_data).toBe('yes');
+      const result = buildShopifyConsent(['necessary', 'marketing']);
+      expect(result.marketing).toBe(true);
+      expect(result.sale_of_data).toBe(true);
     });
   });
 
   describe('updateShopifyConsent', () => {
-    it('calls setTrackingConsent with mapped values', () => {
-      const accepted: CategorySlug[] = ['necessary', 'analytics', 'marketing'];
-      updateShopifyConsent(accepted);
+    it('calls setTrackingConsent with booleans', () => {
+      updateShopifyConsent(['necessary', 'analytics', 'marketing']);
 
       expect(mockSetTrackingConsent).toHaveBeenCalledWith(
         {
-          preferences: 'no',
-          analytics: 'yes',
-          marketing: 'yes',
-          sale_of_data: 'yes',
+          preferences: false,
+          analytics: true,
+          marketing: true,
+          sale_of_data: true,
         },
         expect.any(Function),
       );
