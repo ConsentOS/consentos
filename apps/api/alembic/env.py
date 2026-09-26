@@ -12,8 +12,10 @@ config = context.config
 # Override sqlalchemy.url from environment if set
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
-    # Alembic needs the synchronous driver
-    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+    # Alembic needs the synchronous driver, named explicitly: a bare
+    # postgresql:// URL leaves the choice to SQLAlchemy, and its default
+    # changed from psycopg2 to psycopg 3 in 2.1.
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
     config.set_main_option("sqlalchemy.url", database_url)
 
 # Set up Python logging from the config file

@@ -100,7 +100,7 @@ jobs:
       - name: Run migrations
         run: alembic upgrade head
         env:
-          DATABASE_URL: postgresql://consentos_test:consentos_test@localhost:5432/consentos_test
+          DATABASE_URL: postgresql+psycopg2://consentos_test:consentos_test@localhost:5432/consentos_test
       - run: pytest --cov=src --cov-report=term-missing -v
 
   # ── Scanner ────────────────────────────────────────────────────────
