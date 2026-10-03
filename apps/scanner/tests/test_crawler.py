@@ -49,28 +49,26 @@ def _make_mock_context(
 ):
     """Build a mock BrowserContext.
 
-    *cookies* is returned on the first ``context.cookies()`` call (the
-    initial CDP enumeration).  *delayed_cookies* is returned on the
-    second call (the delayed pass); defaults to the same list so
-    existing tests need no changes.
+    The crawler's settle wait polls ``context.cookies()`` repeatedly
+    until the ``(name, domain)`` set is stable. To model a realistic
+    timeline, *cookies* is returned on the **first** call, and
+    *delayed_cookies* is returned on **every subsequent** call (i.e. a
+    delayed cookie arrives once and then persists, so the set stabilises).
+    Defaults to the same list for both so existing tests need no changes.
     """
     context = AsyncMock()
     context.new_page = AsyncMock(return_value=page)
     first = cookies or []
     second = delayed_cookies if delayed_cookies is not None else first
-    # The crawler calls context.cookies() twice per page (initial +
-    # delayed pass). Using a cycling function instead of a fixed-length
-    # side_effect list so multi-page tests don't exhaust the mock.
-    _cycle = [first, second]
     _call_count = 0
 
-    async def _cycling_cookies(*_args, **_kwargs):
+    async def _cookies(*_args, **_kwargs):
         nonlocal _call_count
-        result = _cycle[_call_count % len(_cycle)]
+        result = first if _call_count == 0 else second
         _call_count += 1
         return result
 
-    context.cookies = AsyncMock(side_effect=_cycling_cookies)
+    context.cookies = AsyncMock(side_effect=_cookies)
     context.clear_cookies = AsyncMock()
     context.close = AsyncMock()
     return context
@@ -422,8 +420,8 @@ class TestCrawlPage:
         assert cookie_names.count("_ga") == 1
 
     @pytest.mark.asyncio(loop_scope="session")
-    async def test_uses_networkidle_wait(self):
-        """page.goto must use wait_until='networkidle'."""
+    async def test_uses_domcontentloaded_wait(self):
+        """page.goto must default to wait_until='domcontentloaded' (not networkidle)."""
         page = _make_mock_page()
         context = _make_mock_context(page)
         browser = _make_mock_browser(context)
@@ -433,7 +431,48 @@ class TestCrawlPage:
 
         page.goto.assert_awaited_once()
         call_kwargs = page.goto.call_args[1]
-        assert call_kwargs.get("wait_until") == "networkidle"
+        assert call_kwargs.get("wait_until") == "domcontentloaded"
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_wait_until_is_configurable(self):
+        """The wait_until strategy honours the constructor argument."""
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        browser = _make_mock_browser(context)
+
+        crawler = CookieCrawler(wait_until="load")
+        await crawler._crawl_page(browser, "https://example.com/")
+
+        call_kwargs = page.goto.call_args[1]
+        assert call_kwargs.get("wait_until") == "load"
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_settle_wait_terminates_when_cookies_keep_changing(self):
+        """A page that sets a new cookie on every poll must not hang the crawl.
+
+        The settle wait must hit its cap and return rather than
+        looping forever, even when the cookie signature never stabilises.
+        """
+        # A fresh cookie name on every cookies() call → signature never stable.
+        call_count = 0
+
+        async def _ever_changing(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            return [{"name": f"rotating_{call_count}", "domain": ".example.com", "value": "x"}]
+
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        context.cookies = AsyncMock(side_effect=_ever_changing)
+
+        # Tiny cap so the test is instant (wait_for_timeout is a no-op mock).
+        crawler = CookieCrawler(settle_max_ms=100, poll_interval_ms=10)
+        cookies = await crawler._wait_for_cookies_to_settle(page, context)
+
+        # Returned the last-seen list and stopped (didn't raise/hang).
+        assert isinstance(cookies, list)
+        assert len(cookies) == 1
+        assert cookies[0]["name"] == f"rotating_{call_count}"
 
 
 # ── CookieCrawler.crawl_site ───────────────────────────────────────────

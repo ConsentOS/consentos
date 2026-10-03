@@ -29,6 +29,13 @@ class ScannerSettings(BaseSettings):
     crawler_timeout_ms: int = 30_000
     crawler_headless: bool = True
     max_pages_per_scan: int = 50
+    # Navigation wait strategy. "domcontentloaded" (default);
+    # "networkidle" is discouraged by Playwright and timed out WordPress-style sites.
+    # See CookieCrawler._wait_for_cookies_to_settle for the cookie settle wait.
+    crawler_wait_until: str = "domcontentloaded"
+    # Cookie settle wait knobs (see _wait_for_cookies_to_settle).
+    crawler_settle_max_ms: int = 15_000
+    crawler_stable_window_ms: int = 2_000
 
 
 # ── Request / Response schemas ───────────────────────────────────────
@@ -167,6 +174,9 @@ def create_app():  # noqa: ANN201
             headless=settings.crawler_headless,
             timeout_ms=settings.crawler_timeout_ms,
             proxy=proxy_config,
+            wait_until=settings.crawler_wait_until,
+            settle_max_ms=settings.crawler_settle_max_ms,
+            stable_window_ms=settings.crawler_stable_window_ms,
         )
         result = await crawler.crawl_site(
             urls, max_pages=min(body.max_pages, settings.max_pages_per_scan)
@@ -253,7 +263,7 @@ def create_app():  # noqa: ANN201
                     # ── Pre-consent check ────────────────────────
                     await page.goto(
                         body.url,
-                        wait_until="networkidle",
+                        wait_until=settings.crawler_wait_until,
                         timeout=settings.crawler_timeout_ms,
                     )
 
@@ -305,7 +315,7 @@ def create_app():  # noqa: ANN201
                     tracker_requests.clear()
                     await page.goto(
                         body.url,
-                        wait_until="networkidle",
+                        wait_until=settings.crawler_wait_until,
                         timeout=settings.crawler_timeout_ms,
                     )
 
