@@ -5,6 +5,7 @@ import type { FormEvent } from 'react';
 import { getOrgConfig, updateOrgConfig } from '../api/org-config';
 import { trackConfigChange } from '../services/analytics';
 import BannerBuilderTab from '../components/BannerBuilderTab';
+import OrgTranslationsTab from '../components/OrgTranslationsTab';
 import { Alert } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
@@ -30,7 +31,7 @@ const GPC_JURISDICTIONS = [
   { value: 'US-MT', label: 'Montana (MTCDPA)' },
 ];
 
-type Tab = 'configuration' | 'banner';
+type Tab = 'configuration' | 'banner' | 'translations';
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -125,6 +126,7 @@ export default function SettingsPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: 'configuration', label: 'Configuration' },
     { key: 'banner', label: 'Banner' },
+    { key: 'translations', label: 'Translations' },
   ];
 
   return (
@@ -380,6 +382,8 @@ export default function SettingsPage() {
             onSave={(body) => updateOrgConfig(body)}
           />
         )}
+
+        {activeTab === 'translations' && <OrgTranslationsTab />}
       </div>
     </div>
   );

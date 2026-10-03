@@ -254,6 +254,40 @@ export interface Translation {
   updated_at: string;
 }
 
+export interface OrgTranslation {
+  id: string;
+  organisation_id: string;
+  locale: string;
+  strings: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SiteGroupTranslation {
+  id: string;
+  site_group_id: string;
+  locale: string;
+  strings: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TranslationKeyInheritance {
+  resolved_value: string | null;
+  source: ConfigSource;
+  site_value: string | null;
+  group_value: string | null;
+  org_value: string | null;
+  system_value: string | null;
+}
+
+export interface TranslationInheritanceResponse {
+  site_id: string;
+  site_group_id: string | null;
+  locale: string;
+  keys: Record<string, TranslationKeyInheritance>;
+}
+
 export interface CookieCategory {
   id: string;
   name: string;

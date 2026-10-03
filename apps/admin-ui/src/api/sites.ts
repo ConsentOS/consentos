@@ -1,4 +1,9 @@
-import type { ConfigInheritanceResponse, Site, SiteConfig } from '../types/api';
+import type {
+  ConfigInheritanceResponse,
+  Site,
+  SiteConfig,
+  TranslationInheritanceResponse,
+} from '../types/api';
 import apiClient from './client';
 
 export async function listSites(): Promise<Site[]> {
@@ -48,6 +53,16 @@ export async function updateSiteConfig(
 export async function getConfigInheritance(siteId: string): Promise<ConfigInheritanceResponse> {
   const { data } = await apiClient.get<ConfigInheritanceResponse>(
     `/config/sites/${siteId}/inheritance`,
+  );
+  return data;
+}
+
+export async function getTranslationInheritance(
+  siteId: string,
+  locale: string,
+): Promise<TranslationInheritanceResponse> {
+  const { data } = await apiClient.get<TranslationInheritanceResponse>(
+    `/config/sites/${siteId}/translations/${locale}/inheritance`,
   );
   return data;
 }
