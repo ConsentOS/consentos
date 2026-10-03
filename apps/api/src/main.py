@@ -2,12 +2,12 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from src.config.edition import edition_name
 from src.config.logging import setup_logging
 from src.config.settings import get_settings
 from src.extensions.registry import discover_extensions, get_registry
+from src.middleware.cors import DynamicCORSMiddleware
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.routers import (
@@ -122,11 +122,8 @@ def create_app() -> FastAPI:
 
     # CORS
     app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.allowed_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        DynamicCORSMiddleware,
+        static_origins=settings.allowed_origins_list,
     )
 
     # Core routers

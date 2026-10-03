@@ -72,7 +72,8 @@ All ConsentOS services read configuration from environment variables (or a `.env
 | `JWT_SECRET_KEY` | Yes | `CHANGE-ME-in-production` | Must be replaced. The API refuses to start in production with the placeholder value. Generate with `openssl rand -hex 32`. |
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | No | `30` | Access token lifetime. |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | No | `7` | Refresh token lifetime. |
-| `ALLOWED_ORIGINS` | Yes | `http://localhost:5173` | Comma-separated list of origins allowed to call the API. Include the admin UI origin and every customer site that embeds the banner. Wildcards are refused when `ENVIRONMENT` is not dev/test. |
+| `ALLOWED_ORIGINS` | Yes | `http://localhost:5173` | Comma-separated list of origins allowed to call the API. Only needs to cover the admin UI origin and any non-site origins — customer site domains are allowed automatically from the sites table. Wildcards are refused when `ENVIRONMENT` is not dev/test. |
+| `CORS_CACHE_TTL` | No | `30` | TTL (seconds) of the Redis-cached set of registered site domains. Site mutations invalidate the cache immediately across all workers/pods; this TTL is a safety net for unnoted changes. |
 
 ### Initial Admin Bootstrap
 
@@ -163,8 +164,10 @@ JWT_SECRET_KEY=<generate with openssl rand -hex 32>
 # CDN — same origin as the admin UI in this setup
 CDN_BASE_URL=https://cmp.example.com
 
-# CORS — admin origin + every customer site embedding the banner
-ALLOWED_ORIGINS=https://cmp.example.com,https://www.example.com
+# CORS — the admin UI origin is enough; customer site domains are allowed
+# automatically from the sites table. Add more origins here only for
+# non-site callers.
+ALLOWED_ORIGINS=https://cmp.example.com
 
 # Initial admin
 INITIAL_ADMIN_EMAIL=admin@example.com
@@ -329,7 +332,8 @@ api:
   env:
     ENVIRONMENT: production
     LOG_LEVEL: INFO
-    ALLOWED_ORIGINS: "https://cmp.example.com,https://www.example.com"
+    ALLOWED_ORIGINS: "https://cmp.example.com"
+    # Customer site domains are allowed automatically from the sites table.
     CDN_BASE_URL: "https://cmp.example.com"
     SCANNER_SERVICE_URL: "http://consentos-scanner:8001"
     # GeoIP — behind Cloudflare, country resolves automatically.
@@ -553,7 +557,7 @@ gcloud run deploy consentos-api \
   --set-env-vars="REDIS_URL=redis://<MEMORYSTORE_IP>:6379/0" \
   --set-env-vars="JWT_SECRET_KEY=<your-key>" \
   --set-env-vars="CDN_BASE_URL=https://cmp.example.com" \
-  --set-env-vars="ALLOWED_ORIGINS=https://cmp.example.com,https://www.example.com" \
+  --set-env-vars="ALLOWED_ORIGINS=https://cmp.example.com" \
   --set-env-vars="SCANNER_SERVICE_URL=https://consentos-scanner-<hash>.run.app" \
   --set-env-vars="INITIAL_ADMIN_EMAIL=admin@example.com" \
   --set-env-vars="INITIAL_ADMIN_PASSWORD=<temp-pw>" \
@@ -681,7 +685,7 @@ Regardless of deployment method, verify these before going live:
 
 - [ ] `consent-loader.js` is the **very first `<script>` in `<head>`** on every customer page. No `async`. No `defer`.
 - [ ] `data-site-id` and `data-api-base` attributes are set correctly on the script tag.
-- [ ] The API's `ALLOWED_ORIGINS` includes every customer site origin that embeds the banner.
+- [ ] `ALLOWED_ORIGINS` includes the admin UI origin. Customer site domains are allowed automatically from the sites table.
 - [ ] `CDN_BASE_URL` points at the origin where `consent-loader.js` and `consent-bundle.js` are served (same as the admin UI in a standard deployment).
 - [ ] Google Tag Manager (if used) is loaded **after** the ConsentOS loader, not before.
 - [ ] The consent cookie (`_consentos_consent`) is accessible on the customer domain — check that `SameSite=Lax` and the domain/path are correct.
@@ -716,7 +720,7 @@ Once logged back in, you can change your email and password from the **Account**
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `_ga` cookie appears before consent | The ConsentOS loader isn't the first script on the page, or it's loaded with `async`/`defer`. | Move the loader to the very top of `<head>` and remove `async`/`defer`. |
-| CORS error on banner config fetch | The customer site's origin isn't in `ALLOWED_ORIGINS`. | Add the origin to the comma-separated list and redeploy. |
+| CORS error on banner config fetch | The customer site's domain isn't registered on a site in the admin UI. | Add the domain to the site (or its `additional_domains`); it takes effect immediately via cache invalidation. |
 | Scanner fails with `httpx.ConnectError` | `SCANNER_SERVICE_URL` doesn't match the scanner's actual address/port, or the scanner's port was overridden by a shared `PORT` env var. | Verify the URL and ensure the scanner uses a scoped `environment:` block, not `env_file: .env`. |
 | API refuses to start: "unsafe configuration" | `JWT_SECRET_KEY` is the placeholder value, or `ALLOWED_ORIGINS` contains `*`, and `ENVIRONMENT` is set to `production`. | Set real values for both. |
 | Cookies still blocked after accepting consent | The loader and banner bundle are separate IIFEs with independent module state. If `window.__consentos._updateBlocker` is missing, the bundle can't drive the loader's blocker. | Upgrade to the latest version — the bridge was added in the `fix/blocker-loader-bundle-bridge` PR. |
