@@ -12,8 +12,10 @@ config = context.config
 # Override sqlalchemy.url from environment if set
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
-    # Alembic needs the synchronous driver
-    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://")
+    # Alembic needs the synchronous driver, named explicitly: a bare
+    # postgresql:// URL leaves the choice to SQLAlchemy, and its default
+    # changed from psycopg2 to psycopg 3 in 2.1.
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
     config.set_main_option("sqlalchemy.url", database_url)
 
 # Set up Python logging from the config file
@@ -22,6 +24,36 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+CORE_TABLES = frozenset(Base.metadata.tables)
+
+
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
+    """Keep autogenerate from proposing changes to tables core does not own.
+
+    An extension package creates its own tables in the same database and
+    tracks them in its own Alembic history. Those tables are absent from
+    this repository's metadata, so without this filter ``alembic revision
+    --autogenerate`` sees them as orphans and emits ``DROP TABLE`` for
+    every one of them, along with the extension's own version table.
+    Running that migration would destroy the extension's data and the
+    means of rebuilding it.
+
+    Only reflected objects are filtered: anything present in core's own
+    metadata is always included.
+
+    The trade-off: deleting a core model no longer produces a
+    ``DROP TABLE`` automatically, because the table stops being in
+    ``CORE_TABLES`` at the same moment. Removing a table is rare and
+    deliberate, so write that migration by hand.
+    """
+    if reflected:
+        if type_ == "table":
+            return name in CORE_TABLES
+        table = getattr(obj, "table", None)
+        if table is not None:
+            return table.name in CORE_TABLES
+    return True
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
@@ -29,6 +61,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -49,6 +82,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

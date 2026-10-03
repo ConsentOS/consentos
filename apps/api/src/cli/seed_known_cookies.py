@@ -33,7 +33,7 @@ _DEFAULT_CSV = Path(__file__).resolve().parent.parent.parent / "data" / "open-co
 
 def _build_sync_url(async_url: str) -> str:
     """Convert an asyncpg DSN to a psycopg2 DSN for one-off scripts."""
-    return async_url.replace("postgresql+asyncpg://", "postgresql://")
+    return async_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
 
 
 def seed(csv_path: Path, *, clear: bool = False) -> int:
