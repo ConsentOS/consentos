@@ -11,6 +11,7 @@ from src.extensions.registry import discover_extensions, get_registry
 from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.routers import (
+    analytics,
     auth,
     compliance,
     config,
@@ -142,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(site_groups.router, prefix=api_prefix)
     app.include_router(site_group_config.router, prefix=api_prefix)
     app.include_router(sites.router, prefix=api_prefix)
+    app.include_router(analytics.router, prefix=api_prefix)
     app.include_router(cookies.router, prefix=api_prefix)
     app.include_router(iab_gvl.router, prefix=api_prefix)
     app.include_router(translations.router, prefix=api_prefix)

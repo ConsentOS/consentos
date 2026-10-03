@@ -1,8 +1,10 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { getConsentRates } from '../api/analytics';
 import { deleteSite } from '../api/sites';
+import ConsentBreakdownCards from './ConsentBreakdownCards';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { MetricCard } from './ui/metric-card';
@@ -36,6 +38,17 @@ export default function SiteOverviewTab({ site, config }: Props) {
     deleteMutation.reset();
   }
 
+  // Consent summary mirrors the Dashboard tab's 30-day window; the shared
+  // query key means no duplicate fetch when both are viewed.
+  const { data: rates } = useQuery({
+    queryKey: ['consent-rates', site.id, 30],
+    queryFn: () => getConsentRates(site.id, { days: 30 }),
+  });
+  const breakdown = rates?.action_breakdown;
+  const decisions = breakdown
+    ? breakdown.accept_all + breakdown.custom + breakdown.reject_all
+    : 0;
+
   return (
     <div className="space-y-6">
       {/* Status cards */}
@@ -55,6 +68,25 @@ export default function SiteOverviewTab({ site, config }: Props) {
           value={`${config?.consent_expiry_days ?? 365} days`}
         />
       </div>
+
+      {/* Consent summary — links into the full Dashboard tab */}
+      {breakdown && decisions > 0 && (
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-heading text-sm font-semibold text-foreground">
+              Consent (last 30 days)
+            </h3>
+            <button
+              type="button"
+              onClick={() => navigate({ hash: 'dashboard' })}
+              className="text-sm font-medium text-copper hover:underline"
+            >
+              View dashboard →
+            </button>
+          </div>
+          <ConsentBreakdownCards breakdown={breakdown} rangeLabel="Last 30 days" />
+        </div>
+      )}
 
       {/* Integration snippet */}
       <Card className="p-6">
