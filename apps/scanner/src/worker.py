@@ -8,6 +8,7 @@ worker to execute scan jobs.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -29,6 +30,7 @@ class ScannerSettings(BaseSettings):
     crawler_timeout_ms: int = 30_000
     crawler_headless: bool = True
     max_pages_per_scan: int = 50
+    scanner_allow_private_networks: bool = False
 
 
 # ── Request / Response schemas ───────────────────────────────────────
@@ -46,6 +48,7 @@ class ScanRequest(BaseModel):
     """Incoming scan request from the API worker."""
 
     domain: str
+    additional_domains: list[str] = Field(default_factory=list)
     urls: list[str] = Field(default_factory=list)
     max_pages: int = 50
     proxy: ProxyRequest | None = None
@@ -126,6 +129,14 @@ def create_app():  # noqa: ANN201
     from fastapi import FastAPI, HTTPException
 
     from src.crawler import CookieCrawler
+    from src.navigation import (
+        ALLOWED_SCHEMES,
+        NavigationPolicy,
+        filter_site_urls,
+        is_valid_hostname,
+        normalise_domain,
+        site_domains,
+    )
     from src.sitemap import discover_urls
 
     app = FastAPI(title="CMP Scanner Service", version="0.1.0")
@@ -138,16 +149,25 @@ def create_app():  # noqa: ANN201
     @app.post("/scan", response_model=ScanResponse)
     async def run_scan(body: ScanRequest) -> ScanResponse:
         """Execute a Playwright crawl and return discovered cookies."""
+        if not is_valid_hostname(body.domain, allow_port=settings.scanner_allow_private_networks):
+            raise HTTPException(status_code=400, detail="Invalid domain")
+        domain = normalise_domain(body.domain)
+        domains = site_domains(domain, body.additional_domains)
+        policy = NavigationPolicy(allow_private_networks=settings.scanner_allow_private_networks)
+
         # Discover URLs if none provided
-        urls = body.urls
-        if not urls:
+        urls = filter_site_urls(body.urls, domains)
+        if not body.urls:
             try:
                 urls = await discover_urls(
-                    body.domain, max_urls=min(body.max_pages, settings.max_pages_per_scan)
+                    domain,
+                    max_urls=min(body.max_pages, settings.max_pages_per_scan),
+                    additional_domains=body.additional_domains,
+                    policy=policy,
                 )
             except Exception as exc:
-                logger.warning("URL discovery failed for %s: %s", body.domain, exc)
-                urls = [f"https://{body.domain}/"]
+                logger.warning("URL discovery failed for %s: %s", domain, exc)
+                urls = [f"https://{domain}/"]
 
         if not urls:
             raise HTTPException(status_code=400, detail="No URLs to scan")
@@ -167,6 +187,7 @@ def create_app():  # noqa: ANN201
             headless=settings.crawler_headless,
             timeout_ms=settings.crawler_timeout_ms,
             proxy=proxy_config,
+            navigation_policy=policy,
         )
         result = await crawler.crawl_site(
             urls, max_pages=min(body.max_pages, settings.max_pages_per_scan)
@@ -215,6 +236,9 @@ def create_app():  # noqa: ANN201
         from src.crawler import ProxyConfig
         from src.dark_pattern_detector import detect_dark_patterns
 
+        if urlparse(body.url).scheme not in ALLOWED_SCHEMES:
+            raise HTTPException(status_code=400, detail="URL must use http or https")
+
         response = ValidationResponse(url=body.url)
         essential_names = set(body.essential_cookie_names)
         tracker_requests: list[str] = []
@@ -240,7 +264,12 @@ def create_app():  # noqa: ANN201
 
                 browser = await pw.chromium.launch(**launch_kwargs)
                 try:
-                    context = await browser.new_context(ignore_https_errors=True)
+                    context = await browser.new_context(
+                        ignore_https_errors=True, service_workers="block"
+                    )
+                    await NavigationPolicy(
+                        allow_private_networks=settings.scanner_allow_private_networks
+                    ).apply(context)
                     page = await context.new_page()
 
                     # Track network requests for tracker detection

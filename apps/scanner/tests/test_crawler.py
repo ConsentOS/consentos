@@ -587,3 +587,34 @@ class TestBuildConsentCookie:
         assert len(seeded) == 1
         assert seeded[0]["name"] == "_consentos_consent"
         assert seeded[0]["url"] == "https://example.com/"
+
+
+# ── Navigation policy ─────────────────────────────────────────────────
+
+
+class TestCrawlNavigationPolicy:
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_route_guard_installed_by_default(self):
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        browser = _make_mock_browser(context)
+
+        crawler = CookieCrawler()
+        await crawler._crawl_page(browser, "https://example.com/")
+
+        context.route.assert_awaited_once()
+        assert context.route.call_args.args[0] == "**/*"
+        assert browser.new_context.await_args.kwargs["service_workers"] == "block"
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_route_guard_skipped_when_private_networks_allowed(self):
+        from src.navigation import NavigationPolicy
+
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        browser = _make_mock_browser(context)
+
+        crawler = CookieCrawler(navigation_policy=NavigationPolicy(allow_private_networks=True))
+        await crawler._crawl_page(browser, "https://example.com/")
+
+        context.route.assert_not_called()

@@ -121,6 +121,9 @@ ConsentOS resolves visitor location for regional consent modes (e.g. opt-in for 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SCANNER_SERVICE_URL` | Yes (API) | `http://localhost:8001` | URL the Celery worker uses to reach the scanner service. In Docker Compose this is `http://consentos-scanner:8001`. |
+| `SCANNER_ALLOW_PRIVATE_NETWORKS` | No (scanner) | `false` | By default the scanner only loads pages and resources from public hosts, and skips sitemap URLs outside the site's domains. Set to `true` to scan sites on private, loopback or link-local addresses, such as intranet sites or a local development server. When `true`, a site domain may also include a port, for example `localhost:3000`. |
+
+The scanner checks each host before loading it, but the complete control is at the network level. Give the scanner container outbound rules that deny private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`), loopback (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`, `fe80::/10`) and unique local (`fc00::/7`) ranges, and allow only DNS and public ports 80 and 443.
 
 > **Important**: the scanner must NOT share the API's `.env` file via `env_file:`. Variables like `PORT` leak across and rebind the scanner off its default `8001`. Use an explicit `environment:` block instead (the prod compose already does this).
 

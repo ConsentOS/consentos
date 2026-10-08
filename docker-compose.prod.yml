@@ -149,6 +149,7 @@ services:
       CRAWLER_HEADLESS: "true"
       CRAWLER_TIMEOUT_MS: "30000"
       MAX_PAGES_PER_SCAN: "50"
+      SCANNER_ALLOW_PRIVATE_NETWORKS: ${SCANNER_ALLOW_PRIVATE_NETWORKS:-false}
     restart: unless-stopped
     # Chromium crashes under /dev/shm pressure on sites with many
     # iframes or heavy DOM trees. Default is 64 MB — not enough.

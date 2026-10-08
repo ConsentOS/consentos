@@ -273,3 +273,76 @@ class TestDiscoverUrls:
         urls = await discover_urls("example.com", max_urls=3)
 
         assert len(urls) == 3
+
+
+# ── Domain filtering ───────────────────────────────────────────────────
+
+MIXED_SITEMAP_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/page1</loc></url>
+  <url><loc>http://169.254.169.254/page</loc></url>
+  <url><loc>https://blog.example.com/post</loc></url>
+  <url><loc>https://other.org/page</loc></url>
+  <url><loc>file:///etc/hosts</loc></url>
+</urlset>
+"""
+
+MIXED_INDEX_XML = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap><loc>http://localhost:8080/sitemap.xml</loc></sitemap>
+  <sitemap><loc>https://example.com/sitemap-blog.xml</loc></sitemap>
+</sitemapindex>
+"""
+
+
+class TestSitemapDomainFiltering:
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_drops_urls_outside_site_domains(self):
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.get = AsyncMock(return_value=_make_response(200, MIXED_SITEMAP_XML))
+
+        urls = await _fetch_sitemap(client, "https://example.com/sitemap.xml", 50, ["example.com"])
+
+        assert urls == ["https://example.com/page1", "https://blog.example.com/post"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_skips_child_sitemaps_outside_site_domains(self):
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.get = AsyncMock(
+            side_effect=[
+                _make_response(200, MIXED_INDEX_XML),
+                _make_response(200, CHILD_SITEMAP_XML),
+            ]
+        )
+
+        urls = await _fetch_sitemap(client, "https://example.com/sitemap.xml", 50, ["example.com"])
+
+        assert urls == ["https://example.com/blog/post1", "https://example.com/blog/post2"]
+        fetched = [call.args[0] for call in client.get.call_args_list]
+        assert "http://localhost:8080/sitemap.xml" not in fetched
+
+    @pytest.mark.asyncio(loop_scope="session")
+    @patch("src.sitemap._fetch_sitemap")
+    @patch("src.sitemap._find_sitemap_in_robots")
+    async def test_ignores_robots_sitemap_on_other_domain(self, mock_robots, mock_sitemap):
+        mock_sitemap.return_value = []
+        mock_robots.return_value = "http://10.0.0.1/sitemap.xml"
+
+        urls = await discover_urls("www.example.com")
+
+        assert mock_sitemap.call_count == 1
+        assert urls[0] == "https://www.example.com/"
+
+    @pytest.mark.asyncio(loop_scope="session")
+    @patch("src.sitemap._fetch_sitemap")
+    @patch("src.sitemap._find_sitemap_in_robots")
+    async def test_robots_sitemap_on_additional_domain(self, mock_robots, mock_sitemap):
+        mock_sitemap.side_effect = [[], ["https://shop.example.org/a"]]
+        mock_robots.return_value = "https://shop.example.org/sitemap.xml"
+
+        urls = await discover_urls("example.com", additional_domains=["shop.example.org"])
+
+        assert urls == ["https://shop.example.org/a"]
+        assert mock_sitemap.call_args.args[3] == ["example.com", "shop.example.org"]
