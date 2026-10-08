@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
@@ -370,5 +371,71 @@ describe('BannerPreview', () => {
     const srcdoc = (screen.getByTitle('Banner preview') as HTMLIFrameElement).getAttribute('srcdoc')!;
     expect(srcdoc).toContain('&amp;');
     expect(srcdoc).not.toContain('?a=1&b=2"');
+  });
+
+  const renderSrcdoc = (props: Partial<ComponentProps<typeof BannerPreview>> = {}) => {
+    render(
+      <BannerPreview
+        bannerConfig={DEFAULT_CONFIG}
+        displayMode="bottom_banner"
+        viewport="desktop"
+        privacyPolicyUrl={null}
+        {...props}
+      />,
+    );
+    return (screen.getByTitle('Banner preview') as HTMLIFrameElement).getAttribute('srcdoc')!;
+  };
+
+  it('uses the live banner defaults when no theme is set', () => {
+    const srcdoc = renderSrcdoc({ bannerConfig: {} });
+    expect(srcdoc).toContain('background: #ffffff');
+    expect(srcdoc).toContain('color: #0E1929');
+    expect(srcdoc).toContain('background: #2C6AE4');
+    expect(srcdoc).toContain("font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif, sans-serif");
+  });
+
+  it('falls back to the defaults for colour and font values the banner rejects', () => {
+    const srcdoc = renderSrcdoc({
+      bannerConfig: {
+        ...DEFAULT_CONFIG,
+        primaryColour: 'red;} body { zoom: 9',
+        fontFamily: 'Inter</style>',
+        acceptButton: { textColour: '"><b>x</b>' },
+      },
+    });
+    expect(srcdoc).not.toContain('zoom: 9');
+    expect(srcdoc).not.toContain('Inter</style>');
+    expect(srcdoc).not.toContain('<b>x</b>');
+    expect(srcdoc).toContain('background: #2C6AE4');
+  });
+
+  it('accepts modern CSS colour values', () => {
+    const srcdoc = renderSrcdoc({ bannerConfig: { ...DEFAULT_CONFIG, primaryColour: 'var(--brand)' } });
+    expect(srcdoc).toContain('background: var(--brand)');
+  });
+
+  it('escapes HTML in translated text', () => {
+    const srcdoc = renderSrcdoc({ previewText: { title: '<img src=x onerror=alert(1)>', description: 'A & B <i>c</i>' } });
+    expect(srcdoc).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(srcdoc).toContain('A &amp; B &lt;i&gt;c&lt;/i&gt;');
+    expect(srcdoc).not.toContain('<img src=x');
+  });
+
+  it('renders description links like the live banner', () => {
+    const srcdoc = renderSrcdoc({ privacyPolicyUrl: 'https://example.com/privacy', termsUrl: null });
+    expect(srcdoc).toContain('<a href="https://example.com/privacy" target="_blank" rel="noopener" class="consentos-banner__link">Privacy Policy</a>');
+    expect(srcdoc).not.toContain('Terms &amp; Conditions');
+  });
+
+  it('renders the terms link when a terms URL is set', () => {
+    const srcdoc = renderSrcdoc({ privacyPolicyUrl: null, termsUrl: '/terms' });
+    expect(srcdoc).toContain('<a href="/terms" target="_blank" rel="noopener" class="consentos-banner__link">Terms &amp; Conditions</a>');
+    expect(srcdoc).not.toContain('>Privacy Policy<');
+  });
+
+  it('does not link disallowed URLs in the description', () => {
+    const srcdoc = renderSrcdoc({ previewText: { description: 'See [policy](javascript:void) here' } });
+    expect(srcdoc).toContain('See policy here');
+    expect(srcdoc).not.toContain('href="javascript:');
   });
 });

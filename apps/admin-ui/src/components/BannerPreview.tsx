@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { BannerConfig, ButtonConfig } from '../types/api';
+import { colourOr, escapeHtml, interpolate, isValidColour, isValidFontFamily, pixelsOr, renderLinks } from '../utils/bannerMarkup';
 
 type DisplayMode = 'bottom_banner' | 'top_banner' | 'overlay' | 'corner_popup';
 type CornerPosition = 'left' | 'right';
@@ -11,7 +12,13 @@ type Viewport = 'desktop' | 'mobile';
 const DEFAULT_TITLE = 'We use cookies';
 const DEFAULT_DESCRIPTION =
   'We use cookies and similar technologies to enhance your browsing experience, ' +
-  'analyse site traffic, and personalise content. You can choose which categories to allow.';
+  'analyse site traffic, and personalise content. You can choose which categories to allow. ' +
+  '[Privacy Policy]({{privacy_policy}}) [Terms & Conditions]({{terms}})';
+const DEFAULT_BACKGROUND = '#ffffff';
+const DEFAULT_TEXT = '#0E1929';
+const DEFAULT_PRIMARY = '#2C6AE4';
+const DEFAULT_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+const DEFAULT_RADIUS = 6;
 const DEFAULT_ACCEPT_ALL = 'Accept all';
 const DEFAULT_REJECT_ALL = 'Reject all';
 const DEFAULT_MANAGE_PREFERENCES = 'Manage preferences';
@@ -23,6 +30,7 @@ interface Props {
   cornerPosition?: CornerPosition;
   viewport: Viewport;
   privacyPolicyUrl: string | null;
+  termsUrl?: string | null;
   siteUrl?: string | null;
   previewLocale?: string;
   /** Per-locale translation strings to render the banner text in. */
@@ -35,6 +43,7 @@ export default function BannerPreview({
   cornerPosition = 'right',
   viewport,
   privacyPolicyUrl,
+  termsUrl = null,
   siteUrl,
   previewLocale,
   previewText,
@@ -43,12 +52,12 @@ export default function BannerPreview({
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const siteIframeRef = useRef<HTMLIFrameElement>(null);
   const bannerSrcdoc = useMemo(
-    () => buildBannerOnlyHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText),
-    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText],
+    () => buildBannerOnlyHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, termsUrl, previewLocale, previewText),
+    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, termsUrl, previewLocale, previewText],
   );
   const fallbackSrcdoc = useMemo(
-    () => buildPreviewHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText),
-    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, previewLocale, previewText],
+    () => buildPreviewHtml(bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, termsUrl, previewLocale, previewText),
+    [bannerConfig, displayMode, cornerPosition, privacyPolicyUrl, termsUrl, previewLocale, previewText],
   );
 
   const fullSiteUrl = useMemo(() => {
@@ -175,22 +184,15 @@ function buildBannerOnlyHtml(
   displayMode: DisplayMode,
   cornerPosition: CornerPosition,
   privacyUrl: string | null,
+  termsUrl: string | null,
   previewLocale?: string,
   previewText?: Record<string, string>,
 ): string {
-  const bg = bc.backgroundColour ?? '#ffffff';
-  const text = bc.textColour ?? '#1a1a2e';
-  const primary = bc.primaryColour ?? '#2563eb';
-  const font = bc.fontFamily ?? 'system-ui';
-  const radius = bc.borderRadius ?? 6;
+  const { bg, text, primary, font, radius } = resolveTheme(bc);
 
   const positionStyles = getPositionStyles(displayMode, cornerPosition, radius, bc.bannerWidth);
-  const { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, privacyLink, titleText, descriptionText } =
-    buildBannerParts(bc, primary, text, radius, privacyUrl, previewText);
-
-  const fontLink = bc.customFontUrl
-    ? `<link rel="stylesheet" href="${escapeHtml(bc.customFontUrl)}">`
-    : '';
+  const { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, titleText, descriptionHtml } =
+    buildBannerParts(bc, primary, text, radius, privacyUrl, termsUrl, previewText);
 
   const langAttr = previewLocale ? escapeHtml(previewLocale) : 'en';
 
@@ -198,7 +200,6 @@ function buildBannerOnlyHtml(
 <html lang="${langAttr}">
 <head>
 <meta charset="utf-8">
-${fontLink}
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: transparent; }
@@ -207,7 +208,7 @@ ${fontLink}
     ${positionStyles}
     background: ${bg};
     color: ${text};
-    font-family: ${font}, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: ${font}, sans-serif;
     font-size: 14px;
     line-height: 1.5;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12);
@@ -266,7 +267,7 @@ ${fontLink}
       ${logoHtml}
       <p class="consentos-banner__title">${escapeHtml(titleText)}</p>
       <p class="consentos-banner__description">
-        ${escapeHtml(descriptionText)}${privacyLink}
+        ${descriptionHtml}
       </p>
       ${cookieCount}
       <div class="consentos-banner__actions">
@@ -287,27 +288,20 @@ function buildPreviewHtml(
   displayMode: DisplayMode,
   cornerPosition: CornerPosition,
   privacyUrl: string | null,
+  termsUrl: string | null,
   previewLocale?: string,
   previewText?: Record<string, string>,
 ): string {
-  const bg = bc.backgroundColour ?? '#ffffff';
-  const text = bc.textColour ?? '#1a1a2e';
-  const primary = bc.primaryColour ?? '#2563eb';
-  const font = bc.fontFamily ?? 'system-ui';
-  const radius = bc.borderRadius ?? 6;
+  const { bg, text, primary, font, radius } = resolveTheme(bc);
 
   const positionStyles = getPositionStyles(displayMode, cornerPosition, radius, bc.bannerWidth);
-  const { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, privacyLink, titleText, descriptionText, savePreferencesText } =
-    buildBannerParts(bc, primary, text, radius, privacyUrl, previewText);
-
-  const fontLink = bc.customFontUrl
-    ? `<link rel="stylesheet" href="${escapeHtml(bc.customFontUrl)}">`
-    : '';
+  const { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, titleText, descriptionHtml, savePreferencesText } =
+    buildBannerParts(bc, primary, text, radius, privacyUrl, termsUrl, previewText);
 
   const langAttr = previewLocale ? escapeHtml(previewLocale) : 'en';
 
   // Build the save preferences button with accept button styling (filled by default)
-  const acceptStyle = buildButtonStyle(bc.acceptButton, 'filled', primary, '#ffffff', 'none', radius);
+  const acceptStyle = buildButtonStyle(bc.acceptButton, primary, '#ffffff', 'none', radius);
   const saveBtnHtml = `<button class="cmp-btn cmp-btn--primary cmp-btn--save" style="${acceptStyle}">${escapeHtml(savePreferencesText)}</button>`;
 
   return `<!DOCTYPE html>
@@ -315,14 +309,13 @@ function buildPreviewHtml(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-${fontLink}
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   html, body {
     height: 100%;
     background: #f3f4f6;
-    font-family: ${font}, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: ${font}, sans-serif;
   }
 
   .page-content {
@@ -338,7 +331,7 @@ ${fontLink}
     ${positionStyles}
     background: ${bg};
     color: ${text};
-    font-family: ${font}, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: ${font}, sans-serif;
     font-size: 14px;
     line-height: 1.5;
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.12);
@@ -417,7 +410,7 @@ ${fontLink}
       ${logoHtml}
       <p class="consentos-banner__title">${escapeHtml(titleText)}</p>
       <p class="consentos-banner__description">
-        ${escapeHtml(descriptionText)}${privacyLink}
+        ${descriptionHtml}
       </p>
       ${cookieCount}
       <div class="consentos-banner__categories" id="cmp-prefs">
@@ -478,27 +471,35 @@ ${fontLink}
 
 /* ── Shared helpers ──────────────────────────────────────────────────── */
 
+function resolveTheme(bc: BannerConfig) {
+  return {
+    bg: colourOr(bc.backgroundColour, DEFAULT_BACKGROUND),
+    text: colourOr(bc.textColour, DEFAULT_TEXT),
+    primary: colourOr(bc.primaryColour, DEFAULT_PRIMARY),
+    font: isValidFontFamily(bc.fontFamily) ? bc.fontFamily : DEFAULT_FONT,
+    radius: pixelsOr(bc.borderRadius, DEFAULT_RADIUS),
+  };
+}
+
 function buildButtonStyle(
   config: ButtonConfig | undefined,
-  defaultStyle: 'filled' | 'outline',
   fallbackBg: string,
   fallbackText: string,
   fallbackBorder: string,
   radius: number,
 ): string {
-  const bg = config?.backgroundColour ?? fallbackBg;
-  const color = config?.textColour ?? fallbackText;
-  const style = config?.style ?? defaultStyle;
-  const border = config?.borderColour
+  const style = config?.style;
+  const background = style === 'text' || style === 'outline'
+    ? 'transparent'
+    : colourOr(config?.backgroundColour, fallbackBg);
+  const color = colourOr(config?.textColour, fallbackText);
+  const border = isValidColour(config?.borderColour)
     ? `1px solid ${config.borderColour}`
     : style === 'outline'
-      ? `1px solid ${config?.textColour ?? fallbackBorder}`
+      ? `1px solid ${color}`
       : style === 'text'
         ? 'none'
-        : fallbackBorder === 'none'
-          ? 'none'
-          : `1px solid ${fallbackBorder}`;
-  const background = style === 'text' ? 'transparent' : style === 'outline' ? 'transparent' : bg;
+        : fallbackBorder;
 
   return `background: ${background}; color: ${color}; border: ${border}; border-radius: ${radius}px;`;
 }
@@ -509,20 +510,26 @@ function buildBannerParts(
   text: string,
   radius: number,
   privacyUrl: string | null,
+  termsUrl: string | null,
   previewText?: Record<string, string>,
 ) {
   // Each button falls back to its own default style: the primary Accept
   // button is filled, the secondary Reject/Manage buttons are outlined.
-  const acceptStyle = buildButtonStyle(bc.acceptButton, 'filled', primary, '#ffffff', 'none', radius);
-  const rejectStyle = buildButtonStyle(bc.rejectButton, 'outline', 'transparent', text, 'rgba(0,0,0,0.2)', radius);
-  const manageStyle = buildButtonStyle(bc.manageButton, 'outline', 'transparent', text, 'rgba(0,0,0,0.2)', radius);
+  const acceptStyle = buildButtonStyle(bc.acceptButton, primary, '#ffffff', 'none', radius);
+  const rejectStyle = buildButtonStyle(bc.rejectButton, 'transparent', text, '1px solid rgba(0,0,0,0.2)', radius);
+  const manageStyle = buildButtonStyle(bc.manageButton, 'transparent', text, '1px solid rgba(0,0,0,0.2)', radius);
 
   // Resolve text: a previewed language's translation strings win, then the
   // banner's own text overrides, then the built-in English defaults.
   const str = (key: keyof NonNullable<BannerConfig['text']>, fallback: string): string =>
     previewText?.[key] || bc.text?.[key] || fallback;
   const titleText = str('title', DEFAULT_TITLE);
-  const descriptionText = str('description', DEFAULT_DESCRIPTION);
+  const descriptionHtml = renderLinks(
+    interpolate(str('description', DEFAULT_DESCRIPTION), {
+      privacy_policy: privacyUrl ?? '',
+      terms: termsUrl ?? '',
+    }),
+  );
   const acceptAllText = str('acceptAll', DEFAULT_ACCEPT_ALL);
   const rejectAllText = str('rejectAll', DEFAULT_REJECT_ALL);
   const managePreferencesText = str('managePreferences', DEFAULT_MANAGE_PREFERENCES);
@@ -551,11 +558,7 @@ function buildBannerParts(
     ? `<span class="cmp-cookie-count">12 cookies used on this site</span>`
     : '';
 
-  const privacyLink = privacyUrl
-    ? ` <a href="#" class="consentos-banner__link" onclick="return false">Privacy Policy</a>`
-    : '';
-
-  return { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, privacyLink, titleText, descriptionText, savePreferencesText };
+  return { rejectBtn, manageBtn, acceptBtn, closeBtn, logoHtml, cookieCount, titleText, descriptionHtml, savePreferencesText };
 }
 
 function getPositionStyles(
@@ -578,12 +581,4 @@ function getPositionStyles(
     default:
       return 'position: fixed; bottom: 0; left: 0; right: 0; z-index: 2147483647;';
   }
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }

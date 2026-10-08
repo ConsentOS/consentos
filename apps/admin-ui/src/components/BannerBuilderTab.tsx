@@ -494,6 +494,7 @@ export default function BannerBuilderTab({ configQueryKey, config, onSave, siteD
           cornerPosition={cornerPosition}
           viewport={viewport}
           privacyPolicyUrl={(config as Record<string, unknown>)?.privacy_policy_url as string ?? null}
+          termsUrl={(config as Record<string, unknown>)?.terms_url as string ?? null}
           siteUrl={siteDomain}
           previewLocale={previewLocale || undefined}
           previewText={previewText}
