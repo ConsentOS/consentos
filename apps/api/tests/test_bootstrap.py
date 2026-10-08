@@ -85,6 +85,7 @@ class TestBootstrapWithDatabase:
             ).scalar_one()
 
         assert user.role == "owner"
+        assert user.is_superuser is True
         assert user.organisation_id == org.id
         assert user.full_name == "Administrator"
         assert verify_password("SuperSecret123", user.password_hash)

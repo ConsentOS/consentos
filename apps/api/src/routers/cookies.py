@@ -27,8 +27,9 @@ from src.schemas.cookie import (
     KnownCookieUpdate,
     ReviewStatus,
 )
+from src.schemas.validators import validate_regex_pattern
 from src.services.classification import classify_single_cookie, classify_site_cookies
-from src.services.dependencies import get_current_user, require_role
+from src.services.dependencies import get_current_user, require_role, require_superuser
 
 router = APIRouter(prefix="/cookies", tags=["cookies"])
 
@@ -425,10 +426,10 @@ async def list_known_cookies(
 )
 async def create_known_cookie(
     body: KnownCookieCreate,
-    _user: CurrentUser = Depends(require_role("owner", "admin")),
+    _user: CurrentUser = Depends(require_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> KnownCookie:
-    """Add a new pattern to the known cookies database."""
+    """Add a new pattern to the shared known cookies database. Platform admins only."""
     # Validate category
     cat = await db.execute(select(CookieCategory).where(CookieCategory.id == body.category_id))
     if not cat.scalar_one_or_none():
@@ -465,10 +466,10 @@ async def get_known_cookie(
 async def update_known_cookie(
     known_id: uuid.UUID,
     body: KnownCookieUpdate,
-    _user: CurrentUser = Depends(require_role("owner", "admin")),
+    _user: CurrentUser = Depends(require_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> KnownCookie:
-    """Update a known cookie pattern."""
+    """Update a shared known cookie pattern. Platform admins only."""
     result = await db.execute(select(KnownCookie).where(KnownCookie.id == known_id))
     known = result.scalar_one_or_none()
     if not known:
@@ -488,6 +489,16 @@ async def update_known_cookie(
                 detail="Invalid category_id",
             )
 
+    if updates.get("is_regex"):
+        try:
+            validate_regex_pattern(known.name_pattern)
+            validate_regex_pattern(known.domain_pattern)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=str(exc),
+            ) from exc
+
     for field, value in updates.items():
         setattr(known, field, value)
     known.updated_at = datetime.now(UTC)
@@ -503,10 +514,10 @@ async def update_known_cookie(
 )
 async def delete_known_cookie(
     known_id: uuid.UUID,
-    _user: CurrentUser = Depends(require_role("owner", "admin")),
+    _user: CurrentUser = Depends(require_superuser),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete a known cookie pattern."""
+    """Delete a shared known cookie pattern. Platform admins only."""
     result = await db.execute(select(KnownCookie).where(KnownCookie.id == known_id))
     known = result.scalar_one_or_none()
     if not known:

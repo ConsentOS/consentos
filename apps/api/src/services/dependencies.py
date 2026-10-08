@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import get_db
 from src.extensions.registry import get_registry
 from src.models.site import Site
+from src.models.user import User
 from src.schemas.auth import CurrentUser
 from src.services.auth_provider import get_default_provider
 
@@ -56,3 +57,28 @@ async def get_org_site(
     if site is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
     return site
+
+
+async def require_superuser(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentUser:
+    """Restrict access to platform admins.
+
+    The flag is read from the database rather than the token so that
+    granting or revoking it takes effect immediately. Use this only for
+    instance-wide data such as the known cookies list; it does not grant
+    access to other organisations' resources.
+    """
+    is_superuser = await db.scalar(
+        select(User.is_superuser).where(
+            User.id == current_user.id,
+            User.deleted_at.is_(None),
+        )
+    )
+    if not is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform admin access is required for this action",
+        )
+    return current_user

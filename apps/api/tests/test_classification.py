@@ -10,12 +10,15 @@ Covers:
   - Integration tests against live database
 """
 
+import re
+import time
 import uuid
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from src.schemas.cookie import (
     ClassificationResultResponse,
@@ -28,9 +31,12 @@ from src.schemas.cookie import (
 from src.services.classification import (
     ClassificationResult,
     MatchSource,
+    _ensure_compiled,
     _match_pattern,
-    _match_regex,
+    _match_regex_known,
+    _wildcard_match,
     classify_cookie,
+    classify_site_cookies,
 )
 
 # ── Schema tests ─────────────────────────────────────────────────────
@@ -57,6 +63,26 @@ class TestSchemas:
             is_regex=True,
         )
         assert kc.is_regex is True
+
+    @pytest.mark.parametrize("field", ["name_pattern", "domain_pattern"])
+    def test_known_cookie_create_rejects_nested_quantifier(self, field):
+        data = {"name_pattern": "_hj.*", "domain_pattern": ".*", "category_id": uuid.uuid4()}
+        data[field] = "(a+)+"
+        with pytest.raises(ValidationError, match="must not repeat"):
+            KnownCookieCreate(**data, is_regex=True)
+
+    def test_known_cookie_create_rejects_invalid_regex(self):
+        with pytest.raises(ValidationError, match="Invalid regular expression"):
+            KnownCookieCreate(
+                name_pattern="[abc",
+                domain_pattern=".*",
+                category_id=uuid.uuid4(),
+                is_regex=True,
+            )
+
+    def test_known_cookie_create_skips_regex_checks_for_globs(self):
+        kc = KnownCookieCreate(name_pattern="*_ga", domain_pattern="*", category_id=uuid.uuid4())
+        assert kc.name_pattern == "*_ga"
 
     def test_known_cookie_update_partial(self):
         ku = KnownCookieUpdate(vendor="Updated Vendor")
@@ -114,7 +140,12 @@ class TestSchemas:
 
 
 class TestPatternMatching:
-    """Test the _match_pattern and _match_regex helpers."""
+    """Test glob matching and compiled regex known-cookie matching."""
+
+    @staticmethod
+    def _regex_matches(pattern: str, value: str) -> bool:
+        known = _make_known(pattern, ".*", uuid.uuid4(), is_regex=True)
+        return _match_regex_known(value, ".example.com", _ensure_compiled([known])) is known
 
     def test_exact_match(self):
         assert _match_pattern("_ga", "_ga") is True
@@ -150,23 +181,54 @@ class TestPatternMatching:
         assert _match_pattern("_ga", "") is False
         assert _match_pattern("", "") is False
 
+    def test_wildcard_edge_cases(self):
+        assert _match_pattern("**", "_ga") is True
+        assert _match_pattern("_ga**", "_ga") is True
+        assert _match_pattern("*_ga*", "x_gax") is True
+        assert _match_pattern("a*b*c", "abc") is True
+        assert _match_pattern("a*b*c", "acb") is False
+        assert _match_pattern("a*a", "a") is False
+
+    def test_wildcard_matches_previous_regex_behaviour(self):
+        alphabet = "ab*"
+        values = ["", "a", "b", "ab", "ba", "aab", "abab", "bbba", "aaaa"]
+
+        def old_match(pattern: str, value: str) -> bool:
+            regex = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
+            return bool(re.match(regex, value))
+
+        patterns = [""]
+        for _ in range(4):
+            patterns += [p + ch for p in patterns for ch in alphabet]
+        for pattern in {p for p in patterns if "*" in p}:
+            for value in values:
+                expected = old_match(pattern, value)
+                assert _wildcard_match(pattern, value) is expected, (pattern, value)
+
+    def test_wildcard_with_many_stars_stays_fast(self):
+        pattern = "*a" * 20 + "*b"
+        value = "a" * 4096
+        started = time.perf_counter()
+        assert _match_pattern(pattern, value) is False
+        assert time.perf_counter() - started < 1.0
+
     def test_regex_match(self):
-        assert _match_regex(r"_hj.*", "_hjSession_12345") is True
-        assert _match_regex(r"_hj.*", "_ga") is False
+        assert self._regex_matches(r"_hj.*", "_hjSession_12345") is True
+        assert self._regex_matches(r"_hj.*", "_ga") is False
 
     def test_regex_case_insensitive(self):
-        assert _match_regex(r"_hj.*", "_HJSession") is True
+        assert self._regex_matches(r"_hj.*", "_HJSession") is True
 
     def test_regex_anchored(self):
         # re.match anchors at start by default
-        assert _match_regex(r"_pk_id.*", "_pk_id.abc.123") is True
-        assert _match_regex(r"_pk_id.*", "x_pk_id") is False
+        assert self._regex_matches(r"_pk_id.*", "_pk_id.abc.123") is True
+        assert self._regex_matches(r"_pk_id.*", "x_pk_id") is False
 
     def test_regex_invalid_pattern(self):
-        assert _match_regex(r"[invalid", "test") is False
+        assert self._regex_matches(r"[invalid", "test") is False
 
     def test_regex_full_domain_match(self):
-        assert _match_regex(r".*", ".example.com") is True
+        assert self._regex_matches(r".*", ".example.com") is True
 
     def test_wildcard_dynamic_id_suffix(self):
         """Cookies with dynamic IDs should match wildcard prefix patterns."""
@@ -387,6 +449,28 @@ class TestClassifyCookie:
         assert result.matched is True
         assert result.vendor == "Meta"
 
+    def test_invalid_stored_regex_is_skipped(self, caplog):
+        bad = _make_known(r"(a+)+$", ".*", self.marketing_cat.id, is_regex=True)
+        broken = _make_known("[abc", ".*", self.marketing_cat.id, is_regex=True)
+        good = _make_known(r"_hj.*", ".*", self.analytics_cat.id, is_regex=True)
+
+        with caplog.at_level("WARNING", logger="src.services.classification"):
+            result = classify_cookie(
+                "_hjSession", ".example.com", [], [], [bad, broken, good], self.category_map
+            )
+
+        assert result.match_source == MatchSource.KNOWN_REGEX
+        assert result.category_id == self.analytics_cat.id
+        assert caplog.text.count("Skipping known cookie") == 2
+
+    def test_precompiled_regex_known(self):
+        known = _make_known(r"_pk_id.*", ".*", self.analytics_cat.id, is_regex=True)
+        compiled = _ensure_compiled([known])
+        result = classify_cookie(
+            "_pk_id.1.abc", ".example.com", [], [], compiled, self.category_map
+        )
+        assert result.match_source == MatchSource.KNOWN_REGEX
+
     def test_classification_result_fields(self):
         result = ClassificationResult(
             cookie_name="_ga",
@@ -395,6 +479,44 @@ class TestClassifyCookie:
         assert result.category_id is None
         assert result.match_source == MatchSource.UNMATCHED
         assert result.matched is False
+
+
+class TestClassifySiteCookies:
+    """Run the DB-backed entry point against a mocked session."""
+
+    @staticmethod
+    def _result(rows):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = rows
+        return result
+
+    @pytest.mark.asyncio
+    async def test_invalid_stored_regex_skipped(self, caplog):
+        analytics = _make_category("analytics")
+        good = _make_known(r"_hj.*", ".*", analytics.id, vendor="Hotjar", is_regex=True)
+        bad = _make_known(r"(a+)+", ".*", analytics.id, is_regex=True)
+        cookie = MagicMock()
+        cookie.name = "_hjSession_1"
+        cookie.domain = ".example.com"
+        cookie.category_id = None
+        cookie.vendor = None
+        cookie.description = None
+
+        db = AsyncMock()
+        db.execute.side_effect = [
+            self._result([]),
+            self._result([bad, good]),
+            self._result([analytics]),
+            self._result([cookie]),
+        ]
+
+        with caplog.at_level("WARNING", logger="src.services.classification"):
+            results = await classify_site_cookies(db, uuid.uuid4())
+
+        assert [r.match_source for r in results] == [MatchSource.KNOWN_REGEX]
+        assert cookie.category_id == analytics.id
+        assert cookie.vendor == "Hotjar"
+        assert "Skipping known cookie" in caplog.text
 
 
 # ── Router unit tests (mocked service) ──────────────────────────────
@@ -413,7 +535,7 @@ def _mock_db():
 async def _client(app, db):
     """Create an async test client with mocked DB and auth."""
     from src.db import get_db
-    from src.services.dependencies import get_current_user, require_role
+    from src.services.dependencies import get_current_user, require_role, require_superuser
 
     user = MagicMock()
     user.organisation_id = uuid.uuid4()
@@ -424,6 +546,7 @@ async def _client(app, db):
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[require_superuser] = lambda: user
 
     def _override_require_role(*_roles):
         return lambda: user
@@ -605,13 +728,13 @@ class TestClassificationIntegration:
         assert resp.status_code == 201, resp.text
         return resp.json()["id"]
 
-    async def test_known_cookies_crud(self, db_client, auth_headers):
+    async def test_known_cookies_crud(self, db_client, superuser_headers):
         """Test full CRUD lifecycle for known cookies."""
-        cat_id = await self._get_category_id(db_client, auth_headers, "analytics")
+        cat_id = await self._get_category_id(db_client, superuser_headers, "analytics")
         # Create
         resp = await db_client.post(
             "/api/v1/cookies/known",
-            headers=auth_headers,
+            headers=superuser_headers,
             json={
                 "name_pattern": f"_test_{uuid.uuid4().hex[:6]}",
                 "domain_pattern": "*",
@@ -626,7 +749,7 @@ class TestClassificationIntegration:
         # Read
         resp = await db_client.get(
             f"/api/v1/cookies/known/{known_id}",
-            headers=auth_headers,
+            headers=superuser_headers,
         )
         assert resp.status_code == 200
         assert resp.json()["vendor"] == "TestVendor"
@@ -634,7 +757,7 @@ class TestClassificationIntegration:
         # Update
         resp = await db_client.patch(
             f"/api/v1/cookies/known/{known_id}",
-            headers=auth_headers,
+            headers=superuser_headers,
             json={"vendor": "UpdatedVendor"},
         )
         assert resp.status_code == 200
@@ -643,7 +766,7 @@ class TestClassificationIntegration:
         # List (with search)
         resp = await db_client.get(
             "/api/v1/cookies/known",
-            headers=auth_headers,
+            headers=superuser_headers,
             params={"vendor": "UpdatedVendor"},
         )
         assert resp.status_code == 200
@@ -652,25 +775,25 @@ class TestClassificationIntegration:
         # Delete
         resp = await db_client.delete(
             f"/api/v1/cookies/known/{known_id}",
-            headers=auth_headers,
+            headers=superuser_headers,
         )
         assert resp.status_code == 204
 
         # Verify deleted
         resp = await db_client.get(
             f"/api/v1/cookies/known/{known_id}",
-            headers=auth_headers,
+            headers=superuser_headers,
         )
         assert resp.status_code == 404
 
-    async def test_classify_exact_match(self, db_client, auth_headers):
+    async def test_classify_exact_match(self, db_client, auth_headers, superuser_headers):
         """Test classification with exact known cookie match."""
         site_id = await create_test_site(db_client, auth_headers, domain_prefix="classify-exact")
         # Create a known cookie pattern
         pattern_name = f"_test_exact_{uuid.uuid4().hex[:6]}"
         await self._create_known_cookie(
             db_client,
-            auth_headers,
+            superuser_headers,
             pattern_name,
             "*",
             "analytics",
@@ -696,14 +819,14 @@ class TestClassificationIntegration:
         matched = [r for r in data["results"] if r["matched"]]
         assert any(r["cookie_name"] == pattern_name for r in matched)
 
-    async def test_classify_regex_match(self, db_client, auth_headers):
+    async def test_classify_regex_match(self, db_client, auth_headers, superuser_headers):
         """Test classification with regex known cookie match."""
         site_id = await create_test_site(db_client, auth_headers, domain_prefix="classify-regex")
         prefix = f"_rx_{uuid.uuid4().hex[:4]}"
         # Create regex pattern
         await self._create_known_cookie(
             db_client,
-            auth_headers,
+            superuser_headers,
             f"{prefix}.*",
             ".*",
             "analytics",
@@ -766,7 +889,7 @@ class TestClassificationIntegration:
         assert data["matched"] is False
         assert data["match_source"] == "unmatched"
 
-    async def test_classify_allow_list_priority(self, db_client, auth_headers):
+    async def test_classify_allow_list_priority(self, db_client, auth_headers, superuser_headers):
         """Allow-list entries should take priority over known cookies."""
         site_id = await create_test_site(db_client, auth_headers, domain_prefix="classify-allow")
         cookie_name = f"_priority_{uuid.uuid4().hex[:6]}"
@@ -774,7 +897,7 @@ class TestClassificationIntegration:
         # Add to known cookies as marketing
         await self._create_known_cookie(
             db_client,
-            auth_headers,
+            superuser_headers,
             cookie_name,
             "*",
             "marketing",
@@ -819,10 +942,10 @@ class TestClassificationIntegration:
         )
         assert resp.status_code == 404
 
-    async def test_known_cookies_invalid_category(self, db_client, auth_headers):
+    async def test_known_cookies_invalid_category(self, db_client, superuser_headers):
         resp = await db_client.post(
             "/api/v1/cookies/known",
-            headers=auth_headers,
+            headers=superuser_headers,
             json={
                 "name_pattern": "_test",
                 "domain_pattern": "*",
@@ -848,12 +971,12 @@ class TestClassificationIntegration:
         assert data["total"] == 0
         assert data["matched"] == 0
 
-    async def test_list_known_cookies_search(self, db_client, auth_headers):
+    async def test_list_known_cookies_search(self, db_client, auth_headers, superuser_headers):
         """Test searching known cookies by name pattern."""
         unique = uuid.uuid4().hex[:6]
         await self._create_known_cookie(
             db_client,
-            auth_headers,
+            superuser_headers,
             f"_search_{unique}",
             "*",
             "analytics",
@@ -867,3 +990,102 @@ class TestClassificationIntegration:
         results = resp.json()
         assert len(results) >= 1
         assert all(f"_search_{unique}" in r["name_pattern"] for r in results)
+
+    async def test_known_cookie_writes_require_platform_admin(
+        self, db_client, auth_headers, superuser_headers
+    ):
+        """Organisation owners can read the shared list but not change it."""
+        cat_id = await self._get_category_id(db_client, auth_headers, "analytics")
+        payload = {
+            "name_pattern": f"_owner_{uuid.uuid4().hex[:6]}",
+            "domain_pattern": "*",
+            "category_id": cat_id,
+        }
+        resp = await db_client.post("/api/v1/cookies/known", headers=auth_headers, json=payload)
+        assert resp.status_code == 403
+
+        known_id = await self._create_known_cookie(
+            db_client, superuser_headers, payload["name_pattern"], "*", "analytics"
+        )
+        url = f"/api/v1/cookies/known/{known_id}"
+
+        assert (await db_client.get(url, headers=auth_headers)).status_code == 200
+        resp = await db_client.patch(url, headers=auth_headers, json={"vendor": "X"})
+        assert resp.status_code == 403
+        assert (await db_client.delete(url, headers=auth_headers)).status_code == 403
+        assert (await db_client.delete(url, headers=superuser_headers)).status_code == 204
+
+    @pytest.mark.parametrize("pattern", [r"(a+)+", r"(a*)*", r"(a|aa)+", r"[abc"])
+    async def test_create_rejects_unsupported_regex(self, db_client, superuser_headers, pattern):
+        cat_id = await self._get_category_id(db_client, superuser_headers, "analytics")
+        resp = await db_client.post(
+            "/api/v1/cookies/known",
+            headers=superuser_headers,
+            json={
+                "name_pattern": pattern,
+                "domain_pattern": ".*",
+                "category_id": cat_id,
+                "is_regex": True,
+            },
+        )
+        assert resp.status_code == 422
+
+    async def test_update_to_regex_validates_stored_patterns(self, db_client, superuser_headers):
+        known_id = await self._create_known_cookie(
+            db_client,
+            superuser_headers,
+            f"*_glob_{uuid.uuid4().hex[:6]}",
+            "*",
+            "analytics",
+        )
+        resp = await db_client.patch(
+            f"/api/v1/cookies/known/{known_id}",
+            headers=superuser_headers,
+            json={"is_regex": True},
+        )
+        assert resp.status_code == 422
+
+    async def test_classify_skips_stored_invalid_pattern(
+        self, db_client, auth_headers, superuser_headers, _test_engine
+    ):
+        """A bad regex already in the database must not break classification."""
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from src.models.cookie import KnownCookie
+
+        site_id = await create_test_site(db_client, auth_headers, domain_prefix="classify-bad")
+        prefix = f"_ok_{uuid.uuid4().hex[:4]}"
+        cat_id = await self._get_category_id(db_client, auth_headers, "analytics")
+        async with AsyncSession(_test_engine) as session:
+            session.add_all(
+                [
+                    KnownCookie(
+                        name_pattern=r"(a+)+$",
+                        domain_pattern=f"bad-{prefix}",
+                        category_id=uuid.UUID(cat_id),
+                        is_regex=True,
+                    ),
+                    KnownCookie(
+                        name_pattern="[unterminated",
+                        domain_pattern=f"bad-{prefix}",
+                        category_id=uuid.UUID(cat_id),
+                        is_regex=True,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        await self._create_known_cookie(
+            db_client, superuser_headers, f"{prefix}.*", ".*", "analytics", is_regex=True
+        )
+        await self._create_cookie(
+            db_client, auth_headers, site_id, f"{prefix}_session", ".example.com"
+        )
+
+        resp = await db_client.post(
+            f"/api/v1/cookies/sites/{site_id}/classify",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        matched = [r for r in resp.json()["results"] if r["matched"]]
+        assert [r["match_source"] for r in matched] == ["known_regex"]

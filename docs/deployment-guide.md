@@ -87,6 +87,8 @@ On first startup, if the `users` table is empty and both credentials below are s
 | `INITIAL_ORG_NAME` | No | `Default Organisation` | Name of the initial organisation. |
 | `INITIAL_ORG_SLUG` | No | `default` | URL slug for the initial organisation. |
 
+The bootstrapped user is also made a [platform admin](#platform-admins).
+
 ### CDN & Banner
 
 | Variable | Required | Default | Description |
@@ -720,6 +722,27 @@ kubectl exec -it deploy/consentos-api -n consentos -- \
 ```
 
 Once logged back in, you can change your email and password from the **Account** page (click your name in the top nav → Account).
+
+---
+
+## Platform Admins
+
+The known cookies database is shared by every organisation on the instance, so changing it is limited to platform admins rather than organisation owners and admins. Everyone who can log in can still read it.
+
+A platform admin is any user with the `is_superuser` flag. The user created by the [initial admin bootstrap](#initial-admin-bootstrap) gets it automatically. To grant it to another user, or to an existing deployment's operator after upgrading:
+
+```bash
+docker exec -it consentos-api python -m src.cli.platform_admin --email ops@example.com
+```
+
+The command shows the matching user and their organisation and asks you to confirm; pass `--yes` to skip the prompt in scripts. Add `--revoke` to remove the flag. It is read on each request, so the change takes effect immediately. It cannot be set through the API or the admin UI; `GET /api/v1/auth/me` reports it as `is_superuser`. On Kubernetes:
+
+```bash
+kubectl exec -it deploy/consentos-api -n consentos -- \
+  python -m src.cli.platform_admin --email ops@example.com
+```
+
+Regex patterns in the known cookies database are checked when saved: they must compile, be at most 255 characters, and must not repeat a group that is itself repeated or contains alternatives (for example `(a+)+` or `(a|aa)+`). Stored patterns that fail these checks are skipped during classification and logged as a warning.
 
 ---
 

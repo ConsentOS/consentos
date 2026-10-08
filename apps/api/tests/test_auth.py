@@ -161,6 +161,7 @@ class TestAuthEndpoints:
         mock_user.email = "user@example.com"
         mock_user.full_name = "Test User"
         mock_user.role = "editor"
+        mock_user.is_superuser = False
         mock_user.deleted_at = None
 
         mock_session = AsyncMock()
@@ -188,6 +189,7 @@ class TestAuthEndpoints:
         assert data["organisation_id"] == str(org_id)
         assert data["role"] == "editor"
         assert data["email"] == "user@example.com"
+        assert data["is_superuser"] is False
 
     async def test_me_with_refresh_token_rejected(self, client):
         token = create_refresh_token(
