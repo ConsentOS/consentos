@@ -1,11 +1,22 @@
+import ipaddress
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Placeholder value — the application refuses to start in non-dev
 # environments if ``jwt_secret_key`` is left at this literal.
 _JWT_PLACEHOLDER = "CHANGE-ME-in-production"
+
+IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+def _parse_networks(value: str) -> tuple[IPNetwork, ...]:
+    return tuple(
+        ipaddress.ip_network(entry.strip(), strict=False)
+        for entry in value.split(",")
+        if entry.strip()
+    )
 
 
 class Settings(BaseSettings):
@@ -129,6 +140,24 @@ class Settings(BaseSettings):
     # Auth endpoints get a stricter bucket via ``RateLimitMiddleware``.
     rate_limit_enabled: bool = True
     rate_limit_per_minute: int = 120
+
+    # Reverse proxies whose ``X-Forwarded-For`` / ``X-Real-IP`` headers
+    # are trusted, as a comma-separated list of IPs or CIDRs. Forwarded
+    # headers are ignored unless the direct peer matches an entry. Set
+    # this when the API sits behind a reverse proxy or load balancer,
+    # otherwise every request appears to come from the proxy.
+    trusted_proxies: str = ""
+
+    @field_validator("trusted_proxies")
+    @classmethod
+    def _validate_trusted_proxies(cls, value: str) -> str:
+        _parse_networks(value)
+        return value
+
+    @property
+    def trusted_proxy_networks(self) -> tuple[IPNetwork, ...]:
+        """Parse ``trusted_proxies`` into IP networks."""
+        return _parse_networks(self.trusted_proxies)
 
     # Anonymous telemetry — daily heartbeat reporting deployment metadata
     # and bucketed scale (no PII, no consent records, no domains). Default

@@ -15,6 +15,7 @@ from src.schemas.consent import (
     ConsentRecordResponse,
     ConsentVerifyResponse,
 )
+from src.services.client_ip import get_client_ip
 from src.services.dependencies import require_role
 from src.services.pseudonymisation import pseudonymise
 
@@ -30,7 +31,7 @@ async def record_consent(
     """Record a consent event from the banner. Public endpoint (no auth required)."""
     # Pseudonymise IP and user agent with HMAC so the resulting values
     # cannot be reversed without the server-side secret.
-    client_ip = request.client.host if request.client else ""
+    client_ip = get_client_ip(request) or ""
     user_agent = request.headers.get("user-agent", "")
 
     record = ConsentRecord(

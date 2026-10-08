@@ -2,12 +2,14 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from src.config.settings import Settings
 from src.main import create_app
+from src.services.pseudonymisation import pseudonymise
 
 
 def _mock_consent_record(**overrides):
@@ -107,6 +109,33 @@ class TestRecordConsent:
                 },
             )
         assert resp.status_code == 201
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("trusted", "expected_ip"),
+        [("", "127.0.0.1"), ("127.0.0.1", "1.2.3.4")],
+    )
+    async def test_record_consent_ip_hash_uses_resolved_client_ip(
+        self, mock_app, trusted, expected_ip
+    ):
+        db = _mock_db()
+        settings = Settings(trusted_proxies=trusted)
+        with patch("src.services.client_ip.get_settings", return_value=settings):
+            async with await _client(mock_app, db) as client:
+                resp = await client.post(
+                    "/api/v1/consent/",
+                    headers={"x-forwarded-for": "1.2.3.4"},
+                    json={
+                        "site_id": str(uuid.uuid4()),
+                        "visitor_id": "visitor-123",
+                        "action": "accept_all",
+                        "categories_accepted": ["necessary"],
+                        "categories_rejected": [],
+                    },
+                )
+        assert resp.status_code == 201
+        record = db.add.call_args.args[0]
+        assert record.ip_hash == pseudonymise(expected_ip)
 
     @pytest.mark.asyncio
     async def test_record_consent_reject_all(self, mock_app):
