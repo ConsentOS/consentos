@@ -6,6 +6,7 @@ Covers:
   - Integration tests against live database
 """
 
+import logging
 import uuid
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
@@ -70,10 +71,27 @@ class TestSchemas:
 # ── Router unit tests (mocked DB) ───────────────────────────────────
 
 
-def _mock_db_with_site():
+def _mock_site(domain="example.com", additional_domains=None):
+    site = MagicMock()
+    site.id = uuid.uuid4()
+    site.domain = domain
+    site.additional_domains = additional_domains
+    return site
+
+
+def _report(page_url="https://example.com", cookies=None):
+    return {
+        "site_id": str(uuid.uuid4()),
+        "page_url": page_url,
+        "cookies": cookies or [],
+        "collected_at": datetime.now().isoformat(),
+    }
+
+
+def _mock_db_with_site(site_mock=None):
     """Create a mock DB that returns a site for validation."""
     db = AsyncMock()
-    site_mock = MagicMock()
+    site_mock = site_mock or _mock_site()
     cookie_result = MagicMock()
     cookie_result.scalar_one_or_none.return_value = None  # no existing cookie
 
@@ -158,7 +176,7 @@ class TestReportEndpoint:
     async def test_report_empty_cookies(self, app):
         db = AsyncMock()
         site_result = MagicMock()
-        site_result.scalar_one_or_none.return_value = MagicMock()
+        site_result.scalar_one_or_none.return_value = _mock_site()
         db.execute.return_value = site_result
         db.flush = AsyncMock()
 
@@ -210,6 +228,92 @@ class TestReportEndpoint:
         assert resp.status_code == 202
         assert resp.json()["cookies_received"] == 3
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "page_url",
+        ["https://other.test/page", "https://example.com.other.test/", "not a url", ""],
+    )
+    async def test_report_page_url_outside_site_rejected(self, app, page_url):
+        db = _mock_db_with_site()
+        async with await _client(app, db) as client:
+            resp = await client.post("/api/v1/scanner/report", json=_report(page_url))
+        assert resp.status_code == 403
+        db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "headers",
+        [{"origin": "https://other.test"}, {"referer": "https://other.test/page"}],
+    )
+    async def test_report_origin_outside_site_rejected(self, app, headers):
+        db = _mock_db_with_site()
+        async with await _client(app, db) as client:
+            resp = await client.post("/api/v1/scanner/report", headers=headers, json=_report())
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("headers", "page_url", "rejected_host"),
+        [
+            ({"origin": "https://other.test"}, "https://example.com/", "other.test"),
+            ({}, "https://elsewhere.test/basket?id=1", "elsewhere.test"),
+        ],
+    )
+    async def test_report_rejection_logged(self, app, caplog, headers, page_url, rejected_host):
+        site = _mock_site()
+        db = _mock_db_with_site(site)
+        with caplog.at_level(logging.WARNING, logger="src.services.site_domains"):
+            async with await _client(app, db) as client:
+                resp = await client.post(
+                    "/api/v1/scanner/report", headers=headers, json=_report(page_url)
+                )
+        assert resp.status_code == 403
+        [record] = [r for r in caplog.records if r.name == "src.services.site_domains"]
+        assert record.levelno == logging.WARNING
+        message = record.getMessage()
+        assert str(site.id) in message
+        assert rejected_host in message
+        assert "https://" not in message
+        assert "basket" not in message
+
+    @pytest.mark.asyncio
+    async def test_report_null_origin_falls_back_to_page_url(self, app):
+        db = _mock_db_with_site()
+        async with await _client(app, db) as client:
+            resp = await client.post(
+                "/api/v1/scanner/report", headers={"origin": "null"}, json=_report()
+            )
+        assert resp.status_code == 202
+
+    @pytest.mark.asyncio
+    async def test_report_matching_subdomain_origin_accepted(self, app):
+        db = _mock_db_with_site()
+        async with await _client(app, db) as client:
+            resp = await client.post(
+                "/api/v1/scanner/report",
+                headers={"origin": "https://shop.example.com"},
+                json=_report("https://shop.example.com/basket"),
+            )
+        assert resp.status_code == 202
+
+    @pytest.mark.asyncio
+    async def test_report_drops_cookies_outside_site_domains(self, app):
+        db = _mock_db_with_site()
+        cookies = [
+            {"name": "_ga", "domain": ".example.com"},
+            {"name": "sub", "domain": "shop.example.com"},
+            {"name": "foreign", "domain": ".other.test"},
+            {"name": "lookalike", "domain": "notexample.com"},
+        ]
+        async with await _client(app, db) as client:
+            resp = await client.post("/api/v1/scanner/report", json=_report(cookies=cookies))
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["cookies_received"] == 4
+        assert data["new_cookies"] == 2
+        added = {call.args[0].name for call in db.add.call_args_list}
+        assert added == {"_ga", "sub"}
+
 
 # ── Integration tests ────────────────────────────────────────────────
 
@@ -220,27 +324,35 @@ except ImportError:
     from conftest import create_test_site, requires_db
 
 
+async def _create_site(client, headers, prefix: str) -> tuple[str, str]:
+    """Create a site and return its ID and domain."""
+    site_id = await create_test_site(client, headers, domain_prefix=prefix)
+    resp = await client.get(f"/api/v1/sites/{site_id}", headers=headers)
+    assert resp.status_code == 200, resp.text
+    return site_id, resp.json()["domain"]
+
+
 @requires_db
 class TestScannerReportIntegration:
     """Integration tests against a live database."""
 
     async def test_report_creates_new_cookies(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="report-new")
+        site_id, domain = await _create_site(db_client, auth_headers, "report-new")
         resp = await db_client.post(
             "/api/v1/scanner/report",
             json={
                 "site_id": site_id,
-                "page_url": "https://report-new.com/page",
+                "page_url": f"https://{domain}/page",
                 "cookies": [
                     {
                         "name": "_ga",
-                        "domain": ".report-new.com",
+                        "domain": f".{domain}",
                         "storage_type": "cookie",
                         "value_length": 30,
                     },
                     {
                         "name": "analytics_id",
-                        "domain": "report-new.com",
+                        "domain": domain,
                         "storage_type": "local_storage",
                         "value_length": 10,
                     },
@@ -265,14 +377,14 @@ class TestScannerReportIntegration:
         assert "analytics_id" in names
 
     async def test_report_deduplicates_existing_cookies(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="report-dedup")
+        site_id, domain = await _create_site(db_client, auth_headers, "report-dedup")
         report_payload = {
             "site_id": site_id,
-            "page_url": "https://report-dedup.com",
+            "page_url": f"https://{domain}",
             "cookies": [
                 {
                     "name": "_dedup_cookie",
-                    "domain": ".report-dedup.com",
+                    "domain": f".{domain}",
                     "storage_type": "cookie",
                     "value_length": 10,
                 },
@@ -291,16 +403,16 @@ class TestScannerReportIntegration:
         assert resp2.json()["new_cookies"] == 0
 
     async def test_report_sets_review_status_pending(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="report-status")
+        site_id, domain = await _create_site(db_client, auth_headers, "report-status")
         await db_client.post(
             "/api/v1/scanner/report",
             json={
                 "site_id": site_id,
-                "page_url": "https://report-status.com",
+                "page_url": f"https://{domain}",
                 "cookies": [
                     {
                         "name": "_status_cookie",
-                        "domain": ".report-status.com",
+                        "domain": f".{domain}",
                         "storage_type": "cookie",
                         "value_length": 5,
                     },
@@ -320,13 +432,13 @@ class TestScannerReportIntegration:
 
     async def test_report_no_auth_required(self, db_client, auth_headers):
         """Report endpoint should work without authentication."""
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="report-noauth")
+        site_id, domain = await _create_site(db_client, auth_headers, "report-noauth")
         # POST without auth headers
         resp = await db_client.post(
             "/api/v1/scanner/report",
             json={
                 "site_id": site_id,
-                "page_url": "https://report-noauth.com",
+                "page_url": f"https://{domain}",
                 "cookies": [],
                 "collected_at": datetime.now().isoformat(),
             },
@@ -344,3 +456,54 @@ class TestScannerReportIntegration:
             },
         )
         assert resp.status_code == 404
+
+    async def test_report_inactive_site_returns_404(self, db_client, auth_headers):
+        site_id, domain = await _create_site(db_client, auth_headers, "report-inactive")
+        resp = await db_client.patch(
+            f"/api/v1/sites/{site_id}", json={"is_active": False}, headers=auth_headers
+        )
+        assert resp.status_code == 200
+        resp = await db_client.post(
+            "/api/v1/scanner/report",
+            json={
+                "site_id": site_id,
+                "page_url": f"https://{domain}/",
+                "cookies": [{"name": "_ga", "domain": f".{domain}"}],
+                "collected_at": datetime.now().isoformat(),
+            },
+        )
+        assert resp.status_code == 404
+
+    async def test_report_rejects_page_url_outside_site(self, db_client, auth_headers):
+        site_id, _ = await _create_site(db_client, auth_headers, "report-foreign-page")
+        resp = await db_client.post(
+            "/api/v1/scanner/report",
+            json={
+                "site_id": site_id,
+                "page_url": "https://elsewhere.test/",
+                "cookies": [],
+                "collected_at": datetime.now().isoformat(),
+            },
+        )
+        assert resp.status_code == 403
+
+    async def test_report_ignores_cookies_outside_site(self, db_client, auth_headers):
+        site_id, domain = await _create_site(db_client, auth_headers, "report-foreign")
+        resp = await db_client.post(
+            "/api/v1/scanner/report",
+            headers={"origin": f"https://www.{domain}"},
+            json={
+                "site_id": site_id,
+                "page_url": f"https://www.{domain}/",
+                "cookies": [
+                    {"name": "_own", "domain": f".{domain}"},
+                    {"name": "_foreign", "domain": ".elsewhere.test"},
+                ],
+                "collected_at": datetime.now().isoformat(),
+            },
+        )
+        assert resp.status_code == 202
+        assert resp.json()["new_cookies"] == 1
+        cookies_resp = await db_client.get(f"/api/v1/cookies/sites/{site_id}", headers=auth_headers)
+        names = {c["name"] for c in cookies_resp.json()}
+        assert names == {"_own"}

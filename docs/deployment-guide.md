@@ -689,12 +689,32 @@ Serverless platforms don't have a persistent filesystem for MaxMind databases. Y
 
 ---
 
+## Upgrade Notes
+
+### Consent and cookie reports are checked against the site's domains
+
+Consent records and cookie reports are only accepted from the site's domain and its additional domains, including their subdomains. The API checks the request's `Origin` header (or `Referer` when `Origin` is absent or `null`) and, for cookie reports, the reported page URL. Requests from any other domain are rejected with `403`, and each rejection is logged at warning level with the site ID and the rejected host. Consent and cookie reports for inactive sites are rejected with `404`.
+
+If you serve one site on several domains, including storefront or staging domains provided by a hosting platform, add each of them to the site's additional domains **before upgrading**. Otherwise consent from those domains will be rejected. Additional domains are set through the sites API:
+
+```bash
+curl -X PATCH https://cmp.example.com/api/v1/sites/<site-id> \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"additional_domains": ["example.org", "shop.example.net"]}'
+```
+
+Registered domains are compared without scheme, port, path or trailing dot, and internationalised domain names match their punycode form, so `bücher.de` and `xn--bcher-kva.de` are treated as the same domain.
+
+---
+
 ## Banner Integration Checklist
 
 Regardless of deployment method, verify these before going live:
 
 - [ ] `consent-loader.js` is the **very first `<script>` in `<head>`** on every customer page. No `async`. No `defer`.
 - [ ] `data-site-id` and `data-api-base` attributes are set correctly on the script tag.
+- [ ] Every domain that serves the site is listed as its primary domain or one of its additional domains; consent and cookie reports from other domains are rejected.
 - [ ] The API's `ALLOWED_ORIGINS` includes every customer site origin that embeds the banner.
 - [ ] `CDN_BASE_URL` points at the origin where `consent-loader.js` and `consent-bundle.js` are served (same as the admin UI in a standard deployment).
 - [ ] Google Tag Manager (if used) is loaded **after** the ConsentOS loader, not before.
@@ -751,6 +771,7 @@ Regex patterns in the known cookies database are checked when saved: they must c
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `_ga` cookie appears before consent | The ConsentOS loader isn't the first script on the page, or it's loaded with `async`/`defer`. | Move the loader to the very top of `<head>` and remove `async`/`defer`. |
+| Consent or cookie reports return `403`, with "does not match site" warnings in the API log | The page is served from a domain that is not registered for the site. | Add the domain to the site's `additional_domains` (see [Upgrade Notes](#upgrade-notes)). |
 | CORS error on banner config fetch | The customer site's origin isn't in `ALLOWED_ORIGINS`. | Add the origin to the comma-separated list and redeploy. |
 | Scanner fails with `httpx.ConnectError` | `SCANNER_SERVICE_URL` doesn't match the scanner's actual address/port, or the scanner's port was overridden by a shared `PORT` env var. | Verify the URL and ensure the scanner uses a scoped `environment:` block, not `env_file: .env`. |
 | API refuses to start: "unsafe configuration" | `JWT_SECRET_KEY` is the placeholder value, or `ALLOWED_ORIGINS` contains `*`, and `ENVIRONMENT` is set to `production`. | Set real values for both. |

@@ -9,7 +9,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,12 @@ from src.services.scanner import (
     compute_scan_diff,
     create_scan_job,
 )
+from src.services.site_domains import (
+    host_matches_site,
+    require_host_on_site,
+    require_request_from_site,
+    url_host,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,30 +53,44 @@ router = APIRouter(prefix="/scanner", tags=["scanner"])
 )
 async def receive_cookie_report(
     body: CookieReportRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> CookieReportResponse:
     """Receive a cookie report from the client-side reporter.
 
     This is a public endpoint (no auth) since it's called from the banner
     script running on end-user browsers. The site_id acts as implicit auth.
+
+    The site must be active. The report's ``page_url`` and, when usable,
+    the request's ``Origin`` or ``Referer`` must belong to the site's
+    domains. Reported cookies whose
+    domain lies outside the site's domains are ignored.
     """
     # Verify site exists
     site_result = await db.execute(
         select(Site).where(
             Site.id == body.site_id,
+            Site.is_active.is_(True),
             Site.deleted_at.is_(None),
         )
     )
-    if site_result.scalar_one_or_none() is None:
+    site = site_result.scalar_one_or_none()
+    if site is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Site not found",
         )
 
+    require_host_on_site(url_host(body.page_url), site, detail="Page URL does not match site")
+    require_request_from_site(request, site)
+
     new_cookies = 0
     now_iso = datetime.now(UTC).isoformat()
 
     for reported in body.cookies:
+        if not host_matches_site(reported.domain, site):
+            continue
+
         # Check if this cookie already exists for the site
         existing = await db.execute(
             select(Cookie).where(
