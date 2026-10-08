@@ -12,6 +12,7 @@
  * named tokens.
  */
 
+import { escapeHtml, isAllowedLinkUrl } from './html';
 import type { TranslationStrings } from './i18n';
 import type { CategorySlug } from './types';
 
@@ -95,14 +96,6 @@ function injectStyles(): void {
   document.head.appendChild(style);
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 function buildHtml(
   data: CookiesWidgetData,
   t: TranslationStrings,
@@ -112,7 +105,7 @@ function buildHtml(
   const categoriesHtml = data.categories
     .map((cat) => renderCategory(cat, acceptedSet))
     .join('');
-  const privacyLink = data.privacy_policy_url
+  const privacyLink = data.privacy_policy_url && isAllowedLinkUrl(data.privacy_policy_url)
     ? `<p class="cmp-cookies__privacy">
         <a href="${escapeHtml(data.privacy_policy_url)}" target="_blank" rel="noopener">Privacy policy</a>
       </p>`

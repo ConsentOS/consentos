@@ -5,6 +5,7 @@ import {
   detectLocale,
   interpolate,
   normaliseLocale,
+  renderLinks,
   selectTranslations,
 } from '../i18n';
 
@@ -149,6 +150,44 @@ describe('i18n', () => {
 
     it('should handle empty template', () => {
       expect(interpolate('', { key: 'value' })).toBe('');
+    });
+  });
+
+  describe('renderLinks', () => {
+    it('converts markdown links to anchors', () => {
+      expect(renderLinks('See [Privacy](https://example.com/p).')).toBe(
+        'See <a href="https://example.com/p" target="_blank" rel="noopener" class="consentos-banner__link">Privacy</a>.',
+      );
+    });
+
+    it('accepts relative URLs', () => {
+      expect(renderLinks('[Terms](/terms)', 'x')).toBe(
+        '<a href="/terms" target="_blank" rel="noopener" class="x">Terms</a>',
+      );
+    });
+
+    it('removes links with empty URLs', () => {
+      expect(renderLinks('Read more. [Privacy]()')).toBe('Read more.');
+    });
+
+    it('escapes surrounding text and link labels', () => {
+      expect(renderLinks('<b>Hi</b> [<i>P</i>](https://example.com)')).toBe(
+        '&lt;b&gt;Hi&lt;/b&gt; <a href="https://example.com" target="_blank" rel="noopener" class="consentos-banner__link">&lt;i&gt;P&lt;/i&gt;</a>',
+      );
+    });
+
+    it('escapes quotes and ampersands in the href', () => {
+      expect(renderLinks('[P](https://example.com/?a=1&b="2")')).toContain(
+        'href="https://example.com/?a=1&amp;b=&quot;2&quot;"',
+      );
+    });
+
+    it('renders the label as plain text for other URL schemes and protocol-relative URLs', () => {
+      expect(renderLinks('[P](javascript:void(0))')).not.toContain('<a');
+      expect(renderLinks('[P](data:text/html,hi)')).toBe('P');
+      expect(renderLinks('[P](JavaScript:x)')).toBe('P');
+      expect(renderLinks('[P](mailto:a@example.com)')).toBe('P');
+      expect(renderLinks('[P](//example.com/p)')).toBe('P');
     });
   });
 });

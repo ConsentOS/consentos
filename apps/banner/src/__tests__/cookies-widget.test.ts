@@ -223,6 +223,25 @@ describe('renderCookiesWidget', () => {
     expect(document.head.querySelectorAll('style#consentos-cookies-widget-styles')).toHaveLength(1);
   });
 
+  it('links the privacy policy when the URL is http(s)', async () => {
+    await renderCookiesWidget({
+      target: host, apiBase: 'http://api', siteId: 'site-A', t: T,
+      currentAccepted: ['necessary'] as CategorySlug[], onSave,
+    });
+    expect(host.querySelector('.cmp-cookies__privacy a')?.getAttribute('href')).toBe(
+      'https://example.com/privacy',
+    );
+  });
+
+  it('omits the privacy policy link for other URL schemes', async () => {
+    stubFetchOk({ ...SAMPLE_PAYLOAD, privacy_policy_url: 'javascript:void(0)' });
+    await renderCookiesWidget({
+      target: host, apiBase: 'http://api', siteId: 'site-A', t: T,
+      currentAccepted: ['necessary'] as CategorySlug[], onSave,
+    });
+    expect(host.querySelector('.cmp-cookies__privacy')).toBeNull();
+  });
+
   it('logs and bails when the fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
