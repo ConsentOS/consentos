@@ -173,7 +173,6 @@ export interface BannerConfig {
   backgroundColour?: string;
   textColour?: string;
   fontFamily?: string;
-  customFontUrl?: string;
   borderRadius?: number;
   /**
    * Preferred banner width in pixels for the overlay (modal) display mode.
