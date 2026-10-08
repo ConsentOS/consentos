@@ -11,6 +11,7 @@ from src.models.iab_gvl import IabGvlMeta
 from src.models.org_config import OrgConfig
 from src.models.site import Site
 from src.models.site_config import SiteConfig
+from src.models.site_group import SiteGroup
 from src.models.site_group_config import SiteGroupConfig
 from src.models.translation import Translation
 from src.schemas.auth import CurrentUser
@@ -516,8 +517,12 @@ async def _get_site_org_id(site_id: uuid.UUID, db: AsyncSession) -> uuid.UUID | 
 
 
 async def _get_site_group_id(site_id: uuid.UUID, db: AsyncSession) -> uuid.UUID | None:
-    """Look up the site_group_id for a site."""
-    result = await db.execute(select(Site.site_group_id).where(Site.id == site_id))
+    """Look up the site_group_id for a site, ignoring groups from another organisation."""
+    result = await db.execute(
+        select(Site.site_group_id)
+        .join(SiteGroup, SiteGroup.id == Site.site_group_id)
+        .where(Site.id == site_id, SiteGroup.organisation_id == Site.organisation_id)
+    )
     return result.scalar_one_or_none()
 
 
