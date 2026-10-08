@@ -11,6 +11,8 @@ from xml.etree import ElementTree
 
 import httpx
 
+from src.navigation import NavigationPolicy, filter_site_urls, is_site_url, site_domains
+
 logger = logging.getLogger(__name__)
 
 # XML namespace used in sitemaps
@@ -33,29 +35,36 @@ async def discover_urls(
     *,
     max_urls: int = 50,
     timeout: float = 10.0,
+    additional_domains: list[str] | None = None,
+    policy: NavigationPolicy | None = None,
 ) -> list[str]:
     """Discover URLs for a domain via sitemap or fallback paths.
 
     Attempts to fetch /sitemap.xml first. If that fails, tries
     /robots.txt for a Sitemap directive. Falls back to default paths.
+    Only URLs on *domain*, *additional_domains* or their subdomains
+    are returned.
     """
     base = f"https://{domain}"
     urls: list[str] = []
+    domains = site_domains(domain, additional_domains or [])
+    policy = policy or NavigationPolicy()
 
     async with httpx.AsyncClient(
         timeout=timeout,
         follow_redirects=True,
         verify=False,  # noqa: S501 — scanning may target sites with self-signed certs
+        event_hooks={"request": [policy.httpx_request_hook]},
     ) as client:
         # Try sitemap.xml
-        sitemap_urls = await _fetch_sitemap(client, f"{base}/sitemap.xml", max_urls)
+        sitemap_urls = await _fetch_sitemap(client, f"{base}/sitemap.xml", max_urls, domains)
         if sitemap_urls:
             return sitemap_urls[:max_urls]
 
         # Try robots.txt for Sitemap directive
         sitemap_url = await _find_sitemap_in_robots(client, f"{base}/robots.txt")
-        if sitemap_url:
-            sitemap_urls = await _fetch_sitemap(client, sitemap_url, max_urls)
+        if sitemap_url and is_site_url(sitemap_url, domains):
+            sitemap_urls = await _fetch_sitemap(client, sitemap_url, max_urls, domains)
             if sitemap_urls:
                 return sitemap_urls[:max_urls]
 
@@ -68,8 +77,13 @@ async def _fetch_sitemap(
     client: httpx.AsyncClient,
     url: str,
     max_urls: int,
+    domains: list[str] | None = None,
 ) -> list[str]:
-    """Fetch and parse an XML sitemap. Handles sitemap indexes."""
+    """Fetch and parse an XML sitemap. Handles sitemap indexes.
+
+    When *domains* is given, child sitemaps and page URLs outside
+    those domains are skipped.
+    """
     try:
         resp = await client.get(url)
         if resp.status_code != 200:
@@ -85,20 +99,24 @@ async def _fetch_sitemap(
         root = ElementTree.fromstring(resp.text)
 
         # Check if it's a sitemap index
-        sitemaps = root.findall("sm:sitemap/sm:loc", _NS)
+        sitemaps = [loc.text.strip() for loc in root.findall("sm:sitemap/sm:loc", _NS) if loc.text]
         if sitemaps:
+            if domains is not None:
+                sitemaps = filter_site_urls(sitemaps, domains)
             urls: list[str] = []
             for sm_loc in sitemaps:
-                if sm_loc.text:
-                    child_urls = await _fetch_sitemap(client, sm_loc.text, max_urls - len(urls))
+                if sm_loc:
+                    child_urls = await _fetch_sitemap(client, sm_loc, max_urls - len(urls), domains)
                     urls.extend(child_urls)
                     if len(urls) >= max_urls:
                         break
             return urls[:max_urls]
 
         # Regular sitemap — extract <loc> URLs
-        locs = root.findall("sm:url/sm:loc", _NS)
-        return [loc.text for loc in locs if loc.text][:max_urls]
+        locs = [loc.text.strip() for loc in root.findall("sm:url/sm:loc", _NS) if loc.text]
+        if domains is not None:
+            locs = filter_site_urls(locs, domains)
+        return locs[:max_urls]
 
     except Exception as exc:
         logger.debug("Failed to fetch sitemap %s: %s", url, exc)

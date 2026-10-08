@@ -60,6 +60,7 @@ services:
       PORT: "8001"
       LOG_LEVEL: INFO
       CRAWLER_HEADLESS: "true"
+      SCANNER_ALLOW_PRIVATE_NETWORKS: ${SCANNER_ALLOW_PRIVATE_NETWORKS:-false}
     depends_on:
       - api
     restart: unless-stopped

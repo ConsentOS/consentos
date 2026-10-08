@@ -32,6 +32,8 @@ from playwright.async_api import (
     async_playwright,
 )
 
+from src.navigation import NavigationPolicy
+
 logger = logging.getLogger(__name__)
 
 # All ConsentOS categories — pre-seeded as accepted on every crawl so
@@ -154,11 +156,13 @@ class CookieCrawler:
         timeout_ms: int = 30_000,
         user_agent: str = _DEFAULT_USER_AGENT,
         proxy: ProxyConfig | None = None,
+        navigation_policy: NavigationPolicy | None = None,
     ) -> None:
         self._headless = headless
         self._timeout_ms = timeout_ms
         self._user_agent = user_agent
         self._proxy = proxy
+        self._navigation_policy = navigation_policy or NavigationPolicy()
 
     async def crawl_site(
         self,
@@ -212,7 +216,9 @@ class CookieCrawler:
             context = await browser.new_context(
                 user_agent=self._user_agent,
                 ignore_https_errors=True,
+                service_workers="block",
             )
+            await self._navigation_policy.apply(context)
             # Start from a clean slate, then plant the ConsentOS consent
             # cookie so the loader treats the visitor as having already
             # accepted every category. Without this the scan only sees
