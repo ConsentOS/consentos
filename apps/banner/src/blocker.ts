@@ -37,7 +37,7 @@ const initiatorMappings: Array<{ pattern: RegExp; category: CategorySlug }> = []
 /** Whether the blocker has been installed. */
 let installed = false;
 
-/** Original document.createElement reference. */
+/** Native document.createElement, captured before page scripts can replace it. */
 let originalCreateElement: typeof document.createElement;
 
 /** Original document.cookie descriptor. */
@@ -88,8 +88,9 @@ export function installBlocker(): void {
   // Merge built-in patterns
   scriptPatterns.push(...BUILTIN_PATTERNS);
 
-  // Install hooks
-  installCreateElementOverride();
+  originalCreateElement = document.createElement.bind(document);
+  installScriptPropertyHooks();
+  installInsertionHooks();
   installMutationObserver();
   installCookieProxy();
   installStorageProxy();
@@ -159,138 +160,266 @@ export function isCategoryAllowed(category: CategorySlug): boolean {
 
 // ─── Script interception ───
 
-/**
- * Override document.createElement to intercept <script> creation.
- * When a script is created and its src matches a known pattern,
- * we set its type to 'text/blocked' to prevent execution.
- */
-function installCreateElementOverride(): void {
-  originalCreateElement = document.createElement.bind(document);
+const XHTML_NS = 'http://www.w3.org/1999/xhtml';
+const INERT_TYPES = new Set(['text/plain', 'text/blocked']);
 
-  document.createElement = function (
-    tagName: string,
-    options?: ElementCreationOptions
-  ): HTMLElement {
-    const element = originalCreateElement(tagName, options);
+let nativeSetAttribute: typeof Element.prototype.setAttribute;
+let nativeSrcDescriptor: PropertyDescriptor | undefined;
+let nativeTypeDescriptor: PropertyDescriptor | undefined;
 
-    if (tagName.toLowerCase() === 'script') {
-      const script = element as HTMLScriptElement;
-      wrapScriptElement(script);
+/** Callbacks that put back every prototype patched by ``installBlocker``. */
+const restorers: Array<() => void> = [];
+
+function isScriptElement(node: unknown): node is HTMLScriptElement {
+  const el = node as Element | null;
+  return !!el && el.nodeType === 1 && el.localName === 'script' && el.namespaceURI === XHTML_NS;
+}
+
+/** Category the script should be held under, or null when it may run now. */
+function categoryToBlock(script: HTMLScriptElement, src: string): CategorySlug | null {
+  if (script.hasAttribute('data-consentos-allowed')) return null;
+  const category = (script.getAttribute('data-category') as CategorySlug | null) || classifyScript(src, script);
+  if (!category || category === 'necessary' || acceptedCategories.has(category)) return null;
+  return category;
+}
+
+/** Make a script inert, keeping its original type for later activation. */
+function neutraliseScript(script: HTMLScriptElement, category: CategorySlug): void {
+  if (!script.hasAttribute('data-consentos-blocked')) {
+    const type = script.getAttribute('type');
+    if (type && !INERT_TYPES.has(type.trim().toLowerCase())) {
+      nativeSetAttribute.call(script, 'data-consentos-original-type', type);
     }
+    nativeSetAttribute.call(script, 'type', 'text/plain');
+    nativeSetAttribute.call(script, 'data-consentos-blocked', 'true');
+  }
+  nativeSetAttribute.call(script, 'data-consentos-category', category);
+}
 
-    return element;
-  } as typeof document.createElement;
+/** Returns true when the assignment was captured instead of applied. */
+function interceptSrc(script: HTMLScriptElement, value: string): boolean {
+  const category = categoryToBlock(script, value);
+  if (!category) return false;
+  neutraliseScript(script, category);
+  nativeSetAttribute.call(script, 'data-consentos-original-src', value);
+  return true;
+}
+
+/** Returns true when a type change on a held script was captured. */
+function interceptType(script: HTMLScriptElement, value: string): boolean {
+  if (!script.hasAttribute('data-consentos-blocked')) return false;
+  nativeSetAttribute.call(script, 'data-consentos-original-type', value);
+  return true;
 }
 
 /**
- * Wrap a script element's `src` setter so that when a src is assigned,
- * we can classify and potentially block it.
+ * Patch the script ``src`` / ``type`` setters and ``setAttribute`` on the
+ * prototypes, so every script instance is covered however it was created.
  */
-function wrapScriptElement(script: HTMLScriptElement): void {
-  const originalSrcDescriptor = Object.getOwnPropertyDescriptor(
-    HTMLScriptElement.prototype,
-    'src'
-  );
-  if (!originalSrcDescriptor) return;
+function installScriptPropertyHooks(): void {
+  const proto = HTMLScriptElement.prototype;
+  nativeSetAttribute = Element.prototype.setAttribute;
+  nativeSrcDescriptor = Object.getOwnPropertyDescriptor(proto, 'src');
+  nativeTypeDescriptor = Object.getOwnPropertyDescriptor(proto, 'type');
+  const srcDesc = nativeSrcDescriptor;
+  const typeDesc = nativeTypeDescriptor;
 
-  let pendingSrc = '';
+  if (srcDesc?.get && srcDesc.set) {
+    Object.defineProperty(proto, 'src', {
+      configurable: true,
+      enumerable: srcDesc.enumerable,
+      get(this: HTMLScriptElement) {
+        const held = this.getAttribute('data-consentos-original-src');
+        return held !== null && this.hasAttribute('data-consentos-blocked') ? held : srcDesc.get!.call(this);
+      },
+      set(this: HTMLScriptElement, value: string) {
+        if (!interceptSrc(this, String(value))) srcDesc.set!.call(this, value);
+      },
+    });
+    restorers.push(() => Object.defineProperty(proto, 'src', srcDesc));
+  }
 
-  Object.defineProperty(script, 'src', {
-    get() {
-      return pendingSrc || originalSrcDescriptor.get?.call(this) || '';
-    },
-    set(value: string) {
-      pendingSrc = value;
-      const category = classifyScript(value, script);
+  if (typeDesc?.get && typeDesc.set) {
+    Object.defineProperty(proto, 'type', {
+      configurable: true,
+      enumerable: typeDesc.enumerable,
+      get: typeDesc.get,
+      set(this: HTMLScriptElement, value: string) {
+        if (!interceptType(this, String(value))) typeDesc.set!.call(this, value);
+      },
+    });
+    restorers.push(() => Object.defineProperty(proto, 'type', typeDesc));
+  }
 
-      if (category && category !== 'necessary' && !acceptedCategories.has(category)) {
-        // Block: change type to prevent execution
-        script.type = 'text/blocked';
-        script.setAttribute('data-consentos-blocked', 'true');
-        script.setAttribute('data-consentos-category', category);
-        script.setAttribute('data-consentos-original-src', value);
-      }
-
-      originalSrcDescriptor.set?.call(this, value);
-    },
-    configurable: true,
-    enumerable: true,
+  const originalSetAttribute = nativeSetAttribute;
+  Element.prototype.setAttribute = function (this: Element, name: string, value: string): void {
+    if (isScriptElement(this)) {
+      const attr = String(name).toLowerCase();
+      if (attr === 'src' && interceptSrc(this, String(value))) return;
+      if (attr === 'type' && interceptType(this, String(value))) return;
+    }
+    originalSetAttribute.call(this, name, value);
+  };
+  restorers.push(() => {
+    Element.prototype.setAttribute = originalSetAttribute;
   });
 }
 
 /**
- * MutationObserver watches for script elements being added to the DOM.
- * If a script should be blocked, we remove it and queue it.
+ * Inspect a node about to be inserted. Non-script nodes without element
+ * children return straight away, so ordinary DOM work stays cheap.
+ */
+function inspectBeforeInsertion(node: unknown): void {
+  if (!node || typeof node !== 'object') return;
+  const n = node as Node;
+  if (isScriptElement(n)) {
+    holdScript(n, false);
+    return;
+  }
+  if ((n.nodeType !== 1 && n.nodeType !== 11) || !(n as ParentNode).firstElementChild) return;
+  const scripts = (n as ParentNode).querySelectorAll('script');
+  for (let i = 0; i < scripts.length; i++) {
+    holdScript(scripts[i], false);
+  }
+}
+
+/** Wrap a DOM insertion method so its node arguments are inspected first. */
+function hookInsertion(proto: object, name: string, firstArgOnly: boolean): void {
+  const target = proto as Record<string, unknown>;
+  const original = target[name];
+  if (typeof original !== 'function') return;
+  target[name] = function (this: unknown, ...args: unknown[]) {
+    if (firstArgOnly) {
+      inspectBeforeInsertion(args[0]);
+    } else {
+      for (const arg of args) inspectBeforeInsertion(arg);
+    }
+    return (original as (...a: unknown[]) => unknown).apply(this, args);
+  };
+  restorers.push(() => {
+    target[name] = original;
+  });
+}
+
+/** Intercept dynamically inserted scripts before they reach the document. */
+function installInsertionHooks(): void {
+  hookInsertion(Node.prototype, 'appendChild', true);
+  hookInsertion(Node.prototype, 'insertBefore', true);
+  hookInsertion(Node.prototype, 'replaceChild', true);
+  for (const name of ['append', 'prepend', 'before', 'after', 'replaceWith', 'replaceChildren']) {
+    hookInsertion(Element.prototype, name, false);
+  }
+  hookInsertion(Element.prototype, 'insertAdjacentElement', false);
+  for (const proto of [DocumentFragment.prototype, Document.prototype]) {
+    for (const name of ['append', 'prepend', 'replaceChildren']) {
+      hookInsertion(proto, name, false);
+    }
+  }
+}
+
+/**
+ * MutationObserver catches scripts added by the HTML parser, including
+ * those nested inside added elements.
  */
 function installMutationObserver(): void {
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
-        if (node instanceof HTMLScriptElement) {
-          handleInsertedScript(node);
+        if (isScriptElement(node)) {
+          holdScript(node, true);
+        } else if (node.nodeType === 1 && (node as Element).firstElementChild) {
+          const scripts = (node as Element).querySelectorAll('script');
+          for (let i = 0; i < scripts.length; i++) {
+            holdScript(scripts[i], true);
+          }
         }
       }
     }
   });
 
-  // Observe as early as possible
   if (document.documentElement) {
     observer.observe(document.documentElement, {
       childList: true,
       subtree: true,
     });
   }
+  restorers.push(() => observer.disconnect());
 }
 
-/** Handle a script element that was just inserted into the DOM. */
-function handleInsertedScript(script: HTMLScriptElement): void {
-  // Skip if it's our own script or already processed
-  if (script.hasAttribute('data-consentos-allowed') || script.hasAttribute('data-consentos-queued')) {
+/**
+ * Queue a script whose category lacks consent. ``connected`` is true when
+ * the script is already in the document (observer path), in which case it
+ * is also removed. Scripts tagged ``type="text/plain" data-category`` whose
+ * category is ``necessary`` or already accepted are activated instead.
+ */
+function holdScript(script: HTMLScriptElement, connected: boolean): void {
+  if (script.hasAttribute('data-consentos-allowed')) return;
+
+  if (script.hasAttribute('data-consentos-queued')) {
+    if (connected) script.parentNode?.removeChild(script);
     return;
   }
 
-  // Check explicit data-category attribute first
   const explicitCategory = script.getAttribute('data-category') as CategorySlug | null;
-  const src = script.getAttribute('data-consentos-original-src') || script.src || '';
+  const src = script.getAttribute('data-consentos-original-src') || script.getAttribute('src') || '';
   const category = explicitCategory || classifyScript(src, script);
 
-  // Necessary scripts always pass through
-  if (!category || category === 'necessary') {
+  if (!category) return;
+
+  if (category === 'necessary' || acceptedCategories.has(category)) {
+    const tagged = explicitCategory || script.hasAttribute('data-consentos-blocked');
+    if (connected && tagged && isInert(script)) activateInPlace(script);
     return;
   }
 
-  // If already consented, allow through
-  if (acceptedCategories.has(category)) {
-    return;
+  neutraliseScript(script, category);
+  nativeSetAttribute.call(script, 'data-consentos-queued', 'true');
+  blockedScripts.push({ element: script, category });
+
+  if (connected) script.parentNode?.removeChild(script);
+}
+
+function isInert(script: HTMLScriptElement): boolean {
+  const type = script.getAttribute('type');
+  return !!type && INERT_TYPES.has(type.trim().toLowerCase());
+}
+
+/** Swap an inert, consented script for a live copy at the same position. */
+function activateInPlace(script: HTMLScriptElement): void {
+  const live = createActiveScript(script);
+  nativeSetAttribute.call(script, 'data-consentos-allowed', 'true');
+  const parent = script.parentNode;
+  if (parent) {
+    parent.replaceChild(live, script);
+  } else {
+    (document.head || document.documentElement).appendChild(live);
+  }
+}
+
+/**
+ * Build a fresh, executable copy of a held script. A new element is needed
+ * because browsers will not run a script element that was already prepared.
+ */
+function createActiveScript(source: HTMLScriptElement): HTMLScriptElement {
+  const script = originalCreateElement('script') as HTMLScriptElement;
+  // Set first so the hooks above let the copy through untouched.
+  nativeSetAttribute.call(script, 'data-consentos-allowed', 'true');
+
+  for (const attr of Array.from(source.attributes)) {
+    if (attr.name === 'type' || attr.name === 'src' || attr.name.startsWith('data-consentos-')) continue;
+    nativeSetAttribute.call(script, attr.name, attr.value);
   }
 
-  // Block: remove from DOM and queue
-  script.setAttribute('data-consentos-queued', 'true');
+  const originalType = source.getAttribute('data-consentos-original-type');
+  if (originalType) nativeSetAttribute.call(script, 'type', originalType);
 
-  // Clone the script for later re-insertion
-  const clone = originalCreateElement('script') as HTMLScriptElement;
-  // Copy attributes
-  for (const attr of Array.from(script.attributes)) {
-    if (attr.name !== 'type' && attr.name !== 'data-consentos-blocked' && attr.name !== 'data-consentos-queued') {
-      clone.setAttribute(attr.name, attr.value);
-    }
+  const src = source.getAttribute('data-consentos-original-src') || source.getAttribute('src');
+  if (src) {
+    nativeSetAttribute.call(script, 'src', src);
+  } else if (source.textContent) {
+    script.textContent = source.textContent;
   }
-  // Copy inline content
-  if (script.textContent) {
-    clone.textContent = script.textContent;
-  }
-  // Restore original src if it was rewritten
-  const originalSrc = script.getAttribute('data-consentos-original-src');
-  if (originalSrc) {
-    clone.setAttribute('data-consentos-original-src', originalSrc);
-  }
-
-  blockedScripts.push({ element: clone, category });
-
-  // Remove from DOM to prevent execution
-  if (script.parentNode) {
-    script.parentNode.removeChild(script);
-  }
+  return script;
 }
 
 // ─── Cookie proxy ───
@@ -385,34 +514,8 @@ function releaseBlockedScripts(): void {
   blockedScripts.length = 0;
   blockedScripts.push(...remaining);
 
-  // Re-insert released scripts in order
   for (const { element } of toRelease) {
-    const script = originalCreateElement('script') as HTMLScriptElement;
-
-    // Copy all attributes
-    for (const attr of Array.from(element.attributes)) {
-      if (attr.name !== 'data-consentos-blocked' && attr.name !== 'data-consentos-queued' && attr.name !== 'data-consentos-category') {
-        script.setAttribute(attr.name, attr.value);
-      }
-    }
-
-    // Use original src if stored
-    const originalSrc = element.getAttribute('data-consentos-original-src');
-    if (originalSrc) {
-      script.src = originalSrc;
-      script.removeAttribute('data-consentos-original-src');
-    }
-
-    // Copy inline script content
-    if (element.textContent && !script.src) {
-      script.textContent = element.textContent;
-    }
-
-    // Mark as allowed so the observer doesn't re-block it
-    script.setAttribute('data-consentos-allowed', 'true');
-
-    // Insert into head
-    (document.head || document.documentElement).appendChild(script);
+    (document.head || document.documentElement).appendChild(createActiveScript(element));
   }
 }
 
@@ -623,10 +726,7 @@ function safeStorage(kind: 'local' | 'session'): Storage | null {
 export function uninstallBlocker(): void {
   if (!installed) return;
 
-  // Restore document.createElement
-  if (originalCreateElement) {
-    document.createElement = originalCreateElement;
-  }
+  while (restorers.length) restorers.pop()!();
 
   // Restore document.cookie
   if (originalCookieDescriptor) {
