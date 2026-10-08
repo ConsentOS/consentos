@@ -182,6 +182,36 @@ class TestConsentEndpoints:
             )
             assert resp.status_code == expected, headers
 
+    async def test_record_consent_stores_gpc_and_gpp_signals(self, db_client, auth_headers):
+        site_id, _ = await _create_site_with_domains(db_client, auth_headers)
+        body = {
+            **_consent_body(site_id),
+            "action": "reject_all",
+            "gpc_detected": True,
+            "gpc_honoured": True,
+            "gpp_string": "DBABLA~BVQqAAAAAg",
+        }
+        resp = await db_client.post("/api/v1/consent/", json=body)
+        assert resp.status_code == 201
+
+        stored = await db_client.get(f"/api/v1/consent/{resp.json()['id']}", headers=auth_headers)
+        assert stored.status_code == 200
+        record = stored.json()
+        assert record["gpc_detected"] is True
+        assert record["gpc_honoured"] is True
+        assert record["gpp_string"] == "DBABLA~BVQqAAAAAg"
+
+    async def test_record_consent_signals_null_when_not_sent(self, db_client, auth_headers):
+        site_id, _ = await _create_site_with_domains(db_client, auth_headers)
+        resp = await db_client.post("/api/v1/consent/", json=_consent_body(site_id))
+        assert resp.status_code == 201
+
+        stored = await db_client.get(f"/api/v1/consent/{resp.json()['id']}", headers=auth_headers)
+        record = stored.json()
+        assert record["gpc_detected"] is None
+        assert record["gpc_honoured"] is None
+        assert record["gpp_string"] is None
+
 
 def _consent_body(site_id: str) -> dict:
     return {
