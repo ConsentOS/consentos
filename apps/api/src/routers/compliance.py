@@ -7,7 +7,7 @@ issues, and recommendations.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,7 @@ from src.services.compliance import (
     calculate_overall_score,
     run_compliance_check,
 )
-from src.services.dependencies import get_current_user
+from src.services.dependencies import get_org_site
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -36,12 +36,7 @@ async def _build_site_context(
 ) -> SiteContext:
     """Load site config and cookie stats to build a SiteContext."""
     # Fetch site config
-    result = await db.execute(
-        select(SiteConfig).where(
-            SiteConfig.site_id == site_id,
-            SiteConfig.deleted_at.is_(None),
-        )
-    )
+    result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
     config = result.scalar_one_or_none()
 
     # Fetch cookie statistics
@@ -74,7 +69,6 @@ async def _build_site_context(
         gcm_enabled=config.gcm_enabled,
         consent_expiry_days=config.consent_expiry_days,
         privacy_policy_url=config.privacy_policy_url,
-        display_mode=config.display_mode,
         banner_config=config.banner_config,
         total_cookies=total_cookies,
         uncategorised_cookies=uncategorised_cookies,
@@ -94,20 +88,9 @@ async def check_compliance(
     site_id: uuid.UUID,
     body: ComplianceCheckRequest | None = None,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    _site: Site = Depends(get_org_site),
 ) -> ComplianceCheckResponse:
     """Run compliance checks against a site's configuration."""
-    # Verify site exists
-    site_result = await db.execute(
-        select(Site).where(Site.id == site_id, Site.deleted_at.is_(None))
-    )
-    site = site_result.scalar_one_or_none()
-    if site is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Site not found",
-        )
-
     ctx = await _build_site_context(site_id, db)
     frameworks = body.frameworks if body else None
     results = run_compliance_check(ctx, frameworks)

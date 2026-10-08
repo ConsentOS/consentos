@@ -1,9 +1,14 @@
+import uuid
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.db import get_db
 from src.extensions.registry import get_registry
+from src.models.site import Site
 from src.schemas.auth import CurrentUser
 from src.services.auth_provider import get_default_provider
 
@@ -32,3 +37,22 @@ def require_role(*allowed_roles: str) -> Callable:
         return current_user
 
     return _check_role
+
+
+async def get_org_site(
+    site_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Site:
+    """Load a non-deleted site in the current user's organisation, else 404."""
+    result = await db.execute(
+        select(Site).where(
+            Site.id == site_id,
+            Site.organisation_id == current_user.organisation_id,
+            Site.deleted_at.is_(None),
+        )
+    )
+    site = result.scalar_one_or_none()
+    if site is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    return site

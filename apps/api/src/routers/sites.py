@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import get_db
 from src.models.site import Site
 from src.models.site_config import SiteConfig
+from src.models.site_group import SiteGroup
 from src.routers.config import (
     _get_site_group_id,
     _load_group_defaults,
@@ -51,6 +52,9 @@ async def create_site(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Site with domain '{body.domain}' already exists in this organisation",
         )
+
+    if body.site_group_id is not None:
+        await _ensure_org_group(body.site_group_id, current_user.organisation_id, db)
 
     site = Site(
         organisation_id=current_user.organisation_id,
@@ -109,6 +113,8 @@ async def update_site(
     site = await _get_org_site(site_id, current_user.organisation_id, db)
 
     update_data = body.model_dump(exclude_unset=True)
+    if update_data.get("site_group_id") is not None:
+        await _ensure_org_group(update_data["site_group_id"], current_user.organisation_id, db)
     for field, value in update_data.items():
         setattr(site, field, value)
 
@@ -275,3 +281,20 @@ async def _get_org_site(
     if site is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
     return site
+
+
+async def _ensure_org_group(
+    group_id: uuid.UUID,
+    organisation_id: uuid.UUID,
+    db: AsyncSession,
+) -> None:
+    """Raise 404 unless the site group exists in the given organisation."""
+    result = await db.execute(
+        select(SiteGroup.id).where(
+            SiteGroup.id == group_id,
+            SiteGroup.organisation_id == organisation_id,
+            SiteGroup.deleted_at.is_(None),
+        )
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site group not found")
