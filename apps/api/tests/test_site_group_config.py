@@ -95,6 +95,35 @@ class TestSiteGroupConfigIntegration:
         assert data["consent_expiry_days"] == 90
 
     @requires_db
+    async def test_group_config_validates_banner_values(self, db_client, auth_headers):
+        resp = await db_client.post(
+            "/api/v1/site-groups/",
+            json={"name": f"banner-group-{uuid.uuid4().hex[:8]}"},
+            headers=auth_headers,
+        )
+        group_id = resp.json()["id"]
+        url = f"/api/v1/site-groups/{group_id}/config"
+
+        for body in (
+            {"banner_config": {"textColour": "red; color: blue"}},
+            {"banner_config": {"fontFamily": "Arial;"}},
+            {"terms_url": "javascript:void(0)"},
+            {"terms_url": "//example.com/terms"},
+        ):
+            resp = await db_client.put(url, json=body, headers=auth_headers)
+            assert resp.status_code == 422, body
+
+        banner = {"textColour": "#111", "fontFamily": "Georgia, serif", "cookie_wall": False}
+        resp = await db_client.put(
+            url,
+            json={"banner_config": banner, "privacy_policy_url": "https://example.com/p"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["banner_config"] == banner
+        assert resp.json()["privacy_policy_url"] == "https://example.com/p"
+
+    @requires_db
     async def test_group_config_not_found_for_other_org(self, db_client, auth_headers):
         fake_group_id = str(uuid.uuid4())
         resp = await db_client.get(

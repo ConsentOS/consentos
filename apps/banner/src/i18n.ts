@@ -8,6 +8,8 @@
  * string interpolation via {{key}} placeholders.
  */
 
+import { escapeHtml, isAllowedLinkUrl } from './html';
+
 export interface TranslationStrings {
   title: string;
   description: string;
@@ -122,17 +124,30 @@ export function interpolate(
 /**
  * Render markdown-style links as HTML anchor tags and strip orphaned links.
  *
- * Converts `[text](url)` to `<a href="url" ...>text</a>`.
+ * The input is plain text: it is HTML-escaped first, then `[text](url)`
+ * is converted to `<a href="url" ...>text</a>`. Only http(s) and relative
+ * URLs become links; any other URL renders the link text on its own.
  * If the URL is empty (because the config value wasn't set), the entire
  * `[text]()` fragment is removed so no broken links appear.
  */
-export function renderLinks(html: string, linkClass: string = 'consentos-banner__link'): string {
+export function renderLinks(text: string, linkClass: string = 'consentos-banner__link'): string {
   // Remove links with empty URLs (including surrounding whitespace)
-  let result = html.replace(/\s*\[([^\]]*)\]\(\s*\)\s*/g, '');
-  // Convert remaining markdown links to <a> tags
-  result = result.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    `<a href="$2" target="_blank" rel="noopener" class="${linkClass}">$1</a>`,
-  );
+  let result = escapeHtml(text.replace(/\s*\[([^\]]*)\]\(\s*\)\s*/g, ''));
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label: string, url: string) => {
+    if (!isAllowedLinkUrl(unescapeHtml(url))) {
+      return label;
+    }
+    return `<a href="${url.trim()}" target="_blank" rel="noopener" class="${escapeHtml(linkClass)}">${label}</a>`;
+  });
   return result;
+}
+
+/** Reverse ``escapeHtml`` so a URL can be checked as written. */
+function unescapeHtml(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }

@@ -264,6 +264,41 @@ class TestSiteConfig:
         assert resp.status_code == 200
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["put", "patch"])
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"banner_config": {"backgroundColour": "#fff; color: red"}},
+            {"banner_config": {"fontFamily": "Arial}"}},
+            {"privacy_policy_url": "javascript:void(0)"},
+        ],
+    )
+    async def test_config_rejects_invalid_banner_values(self, mock_app, method, body):
+        site = _mock_site()
+        db = _mock_db_sequence(site)
+        async with await _client(mock_app, db) as client:
+            resp = await getattr(client, method)(
+                f"/api/v1/sites/{site.id}/config", json=body, headers=_auth_headers()
+            )
+        assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_patch_config_accepts_valid_banner_config(self, mock_app):
+        site = _mock_site()
+        config = _mock_config(site_id=site.id)
+        db = _mock_db_sequence(site, config, None, None)
+        banner = {"primaryColour": "var(--brand)", "fontFamily": "'Inter', sans-serif"}
+        async with await _client(mock_app, db) as client:
+            resp = await client.patch(
+                f"/api/v1/sites/{site.id}/config",
+                json={"banner_config": banner, "terms_url": "/terms"},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == 200
+        assert config.banner_config == banner
+        assert config.terms_url == "/terms"
+
+    @pytest.mark.asyncio
     async def test_patch_config_not_found(self, mock_app):
         site = _mock_site()
         db = _mock_db_sequence(site, None)

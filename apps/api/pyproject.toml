@@ -65,6 +65,7 @@ ignore = ["B008"]  # Depends() in FastAPI defaults is idiomatic
 # Inline HTML templates — line length is unavoidable.
 "src/routers/hosted_pages.py" = ["E501"]
 "src/routers/consent_bridge.py" = ["E501"]
+"src/schemas/banner_config.py" = ["N815"]
 
 [tool.mypy]
 python_version = "3.12"

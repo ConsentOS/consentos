@@ -1,0 +1,66 @@
+{
+  "colour": {
+    "valid": [
+      "#fff",
+      "#FFFF",
+      "#2563eb",
+      "#2563eb80",
+      "rgb(0, 0, 0)",
+      "rgba(0,0,0,0.5)",
+      "rgb(0 0 0 / 50%)",
+      "hsl(210 50% 40%)",
+      "hsla(210, 50%, 40%, 0.2)",
+      "transparent",
+      "RebeccaPurple",
+      "currentColor",
+      "var(--brand)",
+      "hsl(var(--p))",
+      "oklch(70% 0.1 250)",
+      "color-mix(in srgb, red 40%, blue)",
+      "linear-gradient(90deg, #fff, #000)"
+    ],
+    "invalid": [
+      "red;",
+      "red }",
+      "{color: red",
+      "url(x.png)",
+      "URL(x.png)",
+      "rgb(0,0,0);x",
+      "red</style>",
+      "a>b",
+      "\\66 oo",
+      "red /* x */",
+      "red */",
+      "\"red\"",
+      "'red'",
+      "red\nblue",
+      "red\u0000",
+      "red\u0085x"
+    ]
+  },
+  "fontFamily": {
+    "valid": [
+      "system-ui",
+      "\"Open Sans\", Arial, sans-serif",
+      "'Segoe UI', Roboto",
+      "\"Bob's Font\", serif",
+      "My_Font",
+      "Noto Sans JP, ヒラギノ角ゴ",
+      "Ünïcödé Sans",
+      "var(--font-body)"
+    ],
+    "invalid": [
+      "Arial;",
+      "Arial} body{",
+      "Arial\\",
+      "url(x)",
+      "\"Open Sans, Arial",
+      "'Segoe UI",
+      "\"Open Sans' , x",
+      "Arial</style>",
+      "Arial /* x */",
+      "Arial\nTimes",
+      "Arial\u0007"
+    ]
+  }
+}

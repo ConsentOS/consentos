@@ -182,3 +182,38 @@ class TestUpdateOrgConfig:
                 headers=_auth_headers(role="editor"),
             )
         assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_update_stores_banner_config_as_sent(self, mock_app):
+        """PUT /org-config/ stores only the banner keys that were sent."""
+        config = _mock_org_config()
+        db = _mock_db_sequence(config)
+        banner = {"primaryColour": "#2563eb", "show_reject_all": True}
+        async with await _client(mock_app, db) as client:
+            resp = await client.put(
+                "/api/v1/org-config/",
+                json={"banner_config": banner, "privacy_policy_url": "https://example.com/p"},
+                headers=_auth_headers(),
+            )
+        assert resp.status_code == 200
+        assert config.banner_config == banner
+        assert config.privacy_policy_url == "https://example.com/p"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"banner_config": {"primaryColour": "red; } body {"}},
+            {"banner_config": {"fontFamily": "Arial; color: red"}},
+            {"banner_config": {"acceptButton": {"textColour": "url(x)"}}},
+            {"privacy_policy_url": "javascript:void(0)"},
+            {"terms_url": "data:text/html,hi"},
+            {"privacy_policy_url": "//example.com/privacy"},
+        ],
+    )
+    async def test_update_rejects_invalid_banner_values(self, mock_app, body):
+        """PUT /org-config/ returns 422 for invalid colours, fonts and URLs."""
+        db = _mock_db_sequence()
+        async with await _client(mock_app, db) as client:
+            resp = await client.put("/api/v1/org-config/", json=body, headers=_auth_headers())
+        assert resp.status_code == 422

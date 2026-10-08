@@ -22,6 +22,7 @@ import { isImplicitConsentMode } from './blocking-mode';
 import { buildConsentState, readConsent, writeConsent, writeTcfCookie } from './consent';
 import { renderCookiesWidget } from './cookies-widget';
 import { buildGcmStateFromCategories, updateGcm } from './gcm';
+import { escapeHtml, isValidColour, isValidFontFamily } from './html';
 import { type TranslationStrings, DEFAULT_TRANSLATIONS, detectLocale, interpolate, renderLinks, selectTranslations } from './i18n';
 import {
   createTCModel,
@@ -539,35 +540,37 @@ export function renderBanner(
   const nonEssential = nonEssentialFor(enabledCategories);
 
   shadow.innerHTML = `
-    <style>${getBannerStyles(config)}</style>
+    <style></style>
     <div class="cmp-overlay-bg"></div>
-    <div class="consentos-banner" role="dialog" aria-label="${t.title}" aria-labelledby="${titleId}" aria-describedby="${descId}" aria-modal="true">
+    <div class="consentos-banner" role="dialog" aria-label="${escapeHtml(t.title)}" aria-labelledby="${titleId}" aria-describedby="${descId}" aria-modal="true">
       <div class="consentos-banner__content">
         ${renderLogo(config)}
         <div class="consentos-banner__text">
-          <p class="consentos-banner__title" id="${titleId}">${t.title}</p>
+          <p class="consentos-banner__title" id="${titleId}">${escapeHtml(t.title)}</p>
           <p class="consentos-banner__description" id="${descId}">
             ${renderDescription(t.description, config)}
           </p>
         </div>
         ${renderCookieCount(config, t)}
-        <div class="consentos-banner__categories" id="consentos-categories" role="group" aria-label="${t.managePreferences}">
+        <div class="consentos-banner__categories" id="consentos-categories" role="group" aria-label="${escapeHtml(t.managePreferences)}">
           ${renderCategories(t, enabledCategories)}
         </div>
         <div class="consentos-banner__actions" role="group" aria-label="Consent actions">
           <button class="cmp-btn cmp-btn--secondary" data-action="reject" type="button">
-            ${t.rejectAll}
+            ${escapeHtml(t.rejectAll)}
           </button>
           <button class="cmp-btn cmp-btn--secondary" data-action="settings" type="button" aria-expanded="false" aria-controls="consentos-categories">
-            ${t.managePreferences}
+            ${escapeHtml(t.managePreferences)}
           </button>
           <button class="cmp-btn cmp-btn--primary" data-action="accept" type="button">
-            ${t.acceptAll}
+            ${escapeHtml(t.acceptAll)}
           </button>
         </div>
       </div>
     </div>
   `;
+
+  (shadow.querySelector('style') as HTMLStyleElement).textContent = getBannerStyles(config);
 
   // Attach event listeners
   const banner = shadow.querySelector('.consentos-banner') as HTMLElement;
@@ -668,8 +671,8 @@ function renderCategories(t: TranslationStrings, enabled: CategorySlug[]): strin
         (cat) => `
       <label class="cmp-category">
         <div class="cmp-category__info">
-          <span class="cmp-category__name" id="cmp-cat-${cat.slug}">${cat.name}</span>
-          <span class="cmp-category__desc" id="cmp-cat-${cat.slug}-desc">${cat.desc}</span>
+          <span class="cmp-category__name" id="cmp-cat-${cat.slug}">${escapeHtml(cat.name)}</span>
+          <span class="cmp-category__desc" id="cmp-cat-${cat.slug}-desc">${escapeHtml(cat.desc)}</span>
         </div>
         <input type="checkbox" data-category="${cat.slug}"
           aria-labelledby="cmp-cat-${cat.slug}"
@@ -681,7 +684,7 @@ function renderCategories(t: TranslationStrings, enabled: CategorySlug[]): strin
       )
       .join('') +
     `<button class="cmp-btn cmp-btn--primary cmp-btn--save" data-action="save" type="button">
-      ${t.savePreferences}
+      ${escapeHtml(t.savePreferences)}
     </button>`
   );
 }
@@ -825,11 +828,7 @@ export function renderLogo(config: SiteConfig): string {
   if (!banner?.showLogo || !banner.logoUrl) {
     return '';
   }
-  const safeUrl = banner.logoUrl
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  const safeUrl = escapeHtml(banner.logoUrl);
   const height = clampLogoHeight(banner.logoHeight);
   return `<img src="${safeUrl}" alt="" class="cmp-logo" style="height:${height}px" />`;
 }
@@ -859,7 +858,7 @@ export function renderCookieCount(config: SiteConfig, t: TranslationStrings): st
     return '';
   }
   const text = interpolate(t.cookieCount, { count: String(count) });
-  return `<span class="cmp-cookie-count">${text}</span>`;
+  return `<span class="cmp-cookie-count">${escapeHtml(text)}</span>`;
 }
 
 /**
@@ -1090,11 +1089,23 @@ export function showPreferencesButton(config: SiteConfig, t: TranslationStrings)
   host.id = _PREFERENCES_BUTTON_ID;
   const shadow = host.attachShadow({ mode: 'open' });
 
-  const label =
-    t.managePreferences || 'Cookie preferences';
+  const label = escapeHtml(t.managePreferences || 'Cookie preferences');
 
   shadow.innerHTML = `
-    <style>
+    <style></style>
+    <button type="button" aria-label="${label}" title="${label}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M8.5 8.5v.01"/>
+        <path d="M16 15.5v.01"/>
+        <path d="M12 12v.01"/>
+        <path d="M11 17v.01"/>
+        <path d="M7 14v.01"/>
+      </svg>
+      <span>${label}</span>
+    </button>
+  `;
+  (shadow.querySelector('style') as HTMLStyleElement).textContent = `
       :host {
         position: fixed;
         bottom: 20px;
@@ -1124,18 +1135,6 @@ export function showPreferencesButton(config: SiteConfig, t: TranslationStrings)
         button { transition: transform 0.15s ease; }
         button:hover { transform: translateY(-1px); }
       }
-    </style>
-    <button type="button" aria-label="${label}" title="${label}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10"/>
-        <path d="M8.5 8.5v.01"/>
-        <path d="M16 15.5v.01"/>
-        <path d="M12 12v.01"/>
-        <path d="M11 17v.01"/>
-        <path d="M7 14v.01"/>
-      </svg>
-      <span>${label}</span>
-    </button>
   `;
 
   const btn = shadow.querySelector('button') as HTMLButtonElement;
@@ -1151,7 +1150,7 @@ export function showPreferencesButton(config: SiteConfig, t: TranslationStrings)
 /** Resolve position CSS for the banner based on display mode. */
 function getPositionCss(bc: BannerConfig | null): string {
   const mode = bc?.displayMode ?? 'bottom_banner';
-  const radius = bc?.borderRadius ?? 6;
+  const radius = pixelsOr(bc?.borderRadius, 6);
   const cornerPos = bc?.cornerPosition ?? 'right';
   const width = clampBannerWidth(bc?.bannerWidth);
 
@@ -1178,6 +1177,16 @@ function clampBannerWidth(width: number | undefined): number {
   return Math.min(960, Math.max(280, Math.round(width)));
 }
 
+/** Use ``value`` when it is a valid colour, otherwise ``fallback``. */
+function colourOr(value: unknown, fallback: string): string {
+  return isValidColour(value) ? value.trim() : fallback;
+}
+
+/** Use ``value`` when it is a finite, non-negative number, otherwise ``fallback``. */
+function pixelsOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 /** Resolve per-button inline style from ButtonConfig. */
 function getButtonCss(
   btnCfg: ButtonConfig | undefined,
@@ -1189,9 +1198,9 @@ function getButtonCss(
   const style = btnCfg?.style;
   const bg = style === 'text' || style === 'outline'
     ? 'transparent'
-    : btnCfg?.backgroundColour ?? fallbackBg;
-  const color = btnCfg?.textColour ?? fallbackColor;
-  const border = btnCfg?.borderColour
+    : colourOr(btnCfg?.backgroundColour, fallbackBg);
+  const color = colourOr(btnCfg?.textColour, fallbackColor);
+  const border = isValidColour(btnCfg?.borderColour)
     ? `1px solid ${btnCfg.borderColour}`
     : style === 'outline'
       ? `1px solid ${color}`
@@ -1205,11 +1214,13 @@ function getButtonCss(
 /** Banner CSS — isolated inside Shadow DOM. Exported for unit testing only. */
 export function getBannerStyles(config: SiteConfig): string {
   const bc = config.banner_config;
-  const bg = bc?.backgroundColour ?? '#ffffff';
-  const text = bc?.textColour ?? '#0E1929';        // ConsentOS Ink
-  const primary = bc?.primaryColour ?? '#2C6AE4';  // ConsentOS Action Blue
-  const font = bc?.fontFamily ?? '-apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif';
-  const radius = bc?.borderRadius ?? 6;
+  const bg = colourOr(bc?.backgroundColour, '#ffffff');
+  const text = colourOr(bc?.textColour, '#0E1929');        // ConsentOS Ink
+  const primary = colourOr(bc?.primaryColour, '#2C6AE4');  // ConsentOS Action Blue
+  const font = isValidFontFamily(bc?.fontFamily)
+    ? bc.fontFamily
+    : '-apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif';
+  const radius = pixelsOr(bc?.borderRadius, 6);
   const mode = bc?.displayMode ?? 'bottom_banner';
 
   const acceptCss = getButtonCss(bc?.acceptButton, primary, '#ffffff', 'none', radius);

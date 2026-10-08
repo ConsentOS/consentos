@@ -29,7 +29,7 @@ vi.mock('../gcm', () => ({
 
 import { isImplicitConsentMode } from '../blocking-mode';
 import { updateAcceptedCategories } from '../blocker';
-import { showPreferencesButton } from '../banner';
+import { getBannerStyles, renderBanner, renderCookieCount, showPreferencesButton } from '../banner';
 import { buildConsentState, readConsent, writeConsent } from '../consent';
 import { DEFAULT_TRANSLATIONS } from '../i18n';
 import { buildGcmStateFromCategories, updateGcm } from '../gcm';
@@ -111,6 +111,24 @@ describe('banner', () => {
       const legacy = { show_preferences_button: false } as unknown as SiteConfig['banner_config'];
       showPreferencesButton(withBannerConfig(legacy), DEFAULT_TRANSLATIONS);
       expect(document.getElementById(BUTTON_ID)).toBeNull();
+    });
+
+    it('escapes the translated label', () => {
+      showPreferencesButton(withBannerConfig(null), {
+        ...DEFAULT_TRANSLATIONS,
+        managePreferences: 'Prefs <b>now</b> "quoted"',
+      });
+      const shadow = document.getElementById(BUTTON_ID)?.shadowRoot;
+      const button = shadow?.querySelector('button');
+      expect(shadow?.querySelector('b')).toBeNull();
+      expect(button?.getAttribute('aria-label')).toBe('Prefs <b>now</b> "quoted"');
+      expect(button?.querySelector('span')?.textContent).toBe('Prefs <b>now</b> "quoted"');
+    });
+
+    it('sets the button styles through a style element', () => {
+      showPreferencesButton(withBannerConfig(null), DEFAULT_TRANSLATIONS);
+      const style = document.getElementById(BUTTON_ID)?.shadowRoot?.querySelector('style');
+      expect(style?.textContent).toContain('z-index: 2147483646;');
     });
 
     it('positions the button on the left when configured', () => {
@@ -356,6 +374,69 @@ describe('banner', () => {
     });
   });
 
+  describe('renderBanner text and config', () => {
+    const markup = '<b>bold</b> & "quoted"';
+    const shadowOf = () => document.getElementById('consentos-banner-host')?.shadowRoot;
+
+    it('renders translated strings as text', () => {
+      renderBanner(defaultConfig, {
+        ...DEFAULT_TRANSLATIONS,
+        title: markup,
+        acceptAll: markup,
+        rejectAll: markup,
+        managePreferences: markup,
+        savePreferences: markup,
+        categoryNecessary: markup,
+        categoryNecessaryDesc: markup,
+        categoryAnalytics: markup,
+      });
+      const shadow = shadowOf();
+      expect(shadow?.querySelector('b')).toBeNull();
+      const dialog = shadow?.querySelector('.consentos-banner');
+      expect(dialog?.getAttribute('aria-label')).toBe(markup);
+      expect(shadow?.querySelector('.consentos-banner__title')?.textContent).toBe(markup);
+      expect(shadow?.querySelector('[data-action="accept"]')?.textContent?.trim()).toBe(markup);
+      expect(shadow?.querySelector('[data-action="reject"]')?.textContent?.trim()).toBe(markup);
+      expect(shadow?.querySelector('[data-action="settings"]')?.textContent?.trim()).toBe(markup);
+      expect(shadow?.querySelector('[data-action="save"]')?.textContent?.trim()).toBe(markup);
+      expect(shadow?.querySelector('#consentos-categories')?.getAttribute('aria-label')).toBe(markup);
+      expect(shadow?.querySelector('#cmp-cat-necessary')?.textContent).toBe(markup);
+      expect(shadow?.querySelector('#cmp-cat-necessary-desc')?.textContent).toBe(markup);
+      expect(shadow?.querySelector('#cmp-cat-analytics')?.textContent).toBe(markup);
+    });
+
+    it('builds description links only for http(s) URLs', () => {
+      renderBanner(
+        { ...defaultConfig, privacy_policy_url: 'https://example.com/privacy', terms_url: 'javascript:void(0)' },
+        DEFAULT_TRANSLATIONS,
+      );
+      const links = shadowOf()?.querySelectorAll('.consentos-banner__description a');
+      expect(links).toHaveLength(1);
+      expect(links?.[0].getAttribute('href')).toBe('https://example.com/privacy');
+      expect(shadowOf()?.querySelector('.consentos-banner__description')?.textContent).toContain(
+        'Terms & Conditions',
+      );
+    });
+
+    it('sets the banner styles through the style element', () => {
+      const config = { ...defaultConfig, banner_config: { primaryColour: '#123456' } };
+      renderBanner(config, DEFAULT_TRANSLATIONS);
+      const style = shadowOf()?.querySelector('style');
+      expect(style?.textContent).toBe(getBannerStyles(config));
+      expect(style?.textContent).toContain('#123456');
+    });
+  });
+
+  describe('renderCookieCount', () => {
+    it('escapes the translated count text', () => {
+      const html = renderCookieCount(
+        { ...defaultConfig, banner_config: { showCookieCount: true }, cookie_count: 3 },
+        { ...DEFAULT_TRANSLATIONS, cookieCount: '<i>{{count}}</i> cookies' },
+      );
+      expect(html).toBe('<span class="cmp-cookie-count">&lt;i&gt;3&lt;/i&gt; cookies</span>');
+    });
+  });
+
   describe('removeBanner', () => {
     it('should remove the banner host from DOM', async () => {
       const host = document.createElement('div');
@@ -371,35 +452,62 @@ describe('banner', () => {
   });
 
   describe('getBannerStyles', () => {
-    it('should use default colours when no banner_config', () => {
-      const bc = defaultConfig.banner_config;
-      const bg = bc?.backgroundColour ?? '#ffffff';
-      const text = bc?.textColour ?? '#0E1929';
-      const primary = bc?.primaryColour ?? '#2C6AE4';
+    const stylesFor = (banner_config: SiteConfig['banner_config']) =>
+      getBannerStyles({ ...defaultConfig, banner_config });
 
-      expect(bg).toBe('#ffffff');
-      expect(text).toBe('#0E1929');
-      expect(primary).toBe('#2C6AE4');
+    it('uses the default colours and font when no banner_config', () => {
+      const css = stylesFor(null);
+      expect(css).toContain('background: #ffffff;');
+      expect(css).toContain('color: #0E1929;');
+      expect(css).toContain('accent-color: #2C6AE4;');
+      expect(css).toContain("font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif, sans-serif;");
     });
 
-    it('should use custom colours from banner_config', () => {
-      const config = {
-        ...defaultConfig,
-        banner_config: {
-          backgroundColour: '#000000',
-          textColour: '#ffffff',
-          primaryColour: '#ff0000',
-        },
-      };
+    it('uses valid custom colours and font from banner_config', () => {
+      const css = stylesFor({
+        backgroundColour: 'rgb(0, 0, 0)',
+        textColour: 'hsl(0 0% 100%)',
+        primaryColour: 'var(--brand)',
+        fontFamily: '"Open Sans", Arial',
+        borderRadius: 12,
+      });
+      expect(css).toContain('background: rgb(0, 0, 0);');
+      expect(css).toContain('color: hsl(0 0% 100%);');
+      expect(css).toContain('accent-color: var(--brand);');
+      expect(css).toContain('font-family: "Open Sans", Arial, sans-serif;');
+      expect(css).toContain('border-radius: 12px;');
+    });
 
-      const bc = config.banner_config;
-      const bg = bc?.backgroundColour ?? '#ffffff';
-      const text = bc?.textColour ?? '#0E1929';
-      const primary = bc?.primaryColour ?? '#ff0000';
+    it('falls back to defaults for invalid colour, font and radius values', () => {
+      const css = stylesFor({
+        backgroundColour: 'red; } body { visibility: hidden',
+        textColour: 'url(https://example.com/x.png)',
+        primaryColour: 'blue /* x */',
+        fontFamily: 'Arial; } * { color: red',
+        borderRadius: '6px; color: red' as unknown as number,
+      });
+      expect(css).not.toContain('visibility: hidden');
+      expect(css).not.toContain('url(');
+      expect(css).not.toContain('color: red');
+      expect(css).toContain('background: #ffffff;');
+      expect(css).toContain('color: #0E1929;');
+      expect(css).toContain('accent-color: #2C6AE4;');
+      expect(css).toContain('font-family: -apple-system');
+      expect(css).toContain('border-radius: 6px;');
+    });
 
-      expect(bg).toBe('#000000');
-      expect(text).toBe('#ffffff');
-      expect(primary).toBe('#ff0000');
+    it('falls back for invalid button colours', () => {
+      const css = stylesFor({
+        acceptButton: { backgroundColour: 'blue;}', textColour: '#fff', borderColour: 'x{' },
+      });
+      expect(css).toContain('background: #2C6AE4; color: #fff; border: none;');
+    });
+
+    it('applies valid button colours', () => {
+      const css = stylesFor({
+        acceptButton: { backgroundColour: '#00ff00', textColour: 'black', borderColour: '#000' },
+      });
+      expect(css).toContain('background: #00ff00; color: black; border: 1px solid #000;');
     });
   });
 
