@@ -103,7 +103,8 @@ class TestSiteConfigSchemas:
         config = SiteConfigCreate(
             banner_config={"displayMode": "overlay"},
         )
-        assert config.banner_config["displayMode"] == "overlay"
+        assert config.banner_config is not None
+        assert config.banner_config.displayMode == "overlay"
 
 
 class TestEnums:

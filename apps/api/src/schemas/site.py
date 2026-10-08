@@ -4,7 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator
 
-from src.schemas.validators import coerce_blank_to_none
+from src.schemas.banner_config import BannerConfig
+from src.schemas.validators import coerce_blank_to_none, validate_optional_link_url
 
 
 class BlockingMode(StrEnum):
@@ -60,7 +61,7 @@ class SiteConfigCreate(BaseModel):
     gcm_enabled: bool = True
     gcm_default: dict | None = None
     shopify_privacy_enabled: bool = False
-    banner_config: dict | None = None
+    banner_config: BannerConfig | None = None
     privacy_policy_url: str | None = None
     terms_url: str | None = None
     scan_schedule_cron: str | None = None
@@ -74,6 +75,10 @@ class SiteConfigCreate(BaseModel):
     # IAB vendor IDs disclosed to users in the CMP UI (TCF v2.3
     # DisclosedVendors segment). ``None`` inherits from the cascade.
     disclosed_vendor_ids: list[int] | None = None
+
+    _check_link_urls = field_validator("privacy_policy_url", "terms_url")(
+        validate_optional_link_url
+    )
 
 
 class SiteConfigUpdate(BaseModel):
@@ -89,7 +94,7 @@ class SiteConfigUpdate(BaseModel):
     gcm_enabled: bool | None = None
     gcm_default: dict | None = None
     shopify_privacy_enabled: bool | None = None
-    banner_config: dict | None = None
+    banner_config: BannerConfig | None = None
     privacy_policy_url: str | None = None
     terms_url: str | None = None
     scan_schedule_cron: str | None = None
@@ -106,6 +111,9 @@ class SiteConfigUpdate(BaseModel):
         "scan_schedule_cron",
         mode="before",
     )(coerce_blank_to_none)
+    _check_link_urls = field_validator("privacy_policy_url", "terms_url")(
+        validate_optional_link_url
+    )
 
 
 class SiteConfigResponse(BaseModel):
