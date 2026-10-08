@@ -103,6 +103,8 @@ You can now log in at `http://localhost:5173` with the credentials you set above
 
 The admin UI dog-foods the banner script at `http://localhost:5173/banner/consent-loader.js`. In production you'd publish those files to a CDN and point `CDN_BASE_URL` at it.
 
+To hold back your own third-party scripts until the visitor consents, tag them with `type="text/plain" data-category="..."`. See [docs/script-blocking.md](docs/script-blocking.md).
+
 ### Upgrading from PostgreSQL 16
 
 The dev compose ships `postgres:17-alpine`. If your `consentos_pgdata` volume was initialised on an earlier major (e.g. `postgres:16-alpine`), the postgres container fails to start with:
