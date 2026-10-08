@@ -687,3 +687,25 @@ class TestGetSitesDueForScan:
 
             due_ids = {s.id for s in await get_sites_due_for_scan(session)}
             assert site.id in due_ids
+
+
+class TestBuildScanPayload:
+    def test_includes_additional_domains(self):
+        from src.tasks.scanner import build_scan_payload
+
+        site = MagicMock(
+            domain="example.com", additional_domains=["example.org", "shop.example.net"]
+        )
+
+        assert build_scan_payload(site, 25) == {
+            "domain": "example.com",
+            "additional_domains": ["example.org", "shop.example.net"],
+            "max_pages": 25,
+        }
+
+    def test_missing_additional_domains_sends_empty_list(self):
+        from src.tasks.scanner import build_scan_payload
+
+        site = MagicMock(domain="example.com", additional_domains=None)
+
+        assert build_scan_payload(site, 50)["additional_domains"] == []

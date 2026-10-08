@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import TYPE_CHECKING
 
 import httpx
 
 from src.celery_app import app
+
+if TYPE_CHECKING:
+    from src.models.site import Site
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +82,7 @@ def run_scan(self, scan_job_id: str, site_id: str) -> dict:
                 ) as client:
                     resp = await client.post(
                         scanner_url,
-                        json={
-                            "domain": site.domain,
-                            "max_pages": max_pages,
-                        },
+                        json=build_scan_payload(site, max_pages),
                     )
                     resp.raise_for_status()
                     scan_data = resp.json()
@@ -172,6 +173,15 @@ def run_scan(self, scan_job_id: str, site_id: str) -> dict:
                 await engine.dispose()
 
     return asyncio.run(_execute())
+
+
+def build_scan_payload(site: Site, max_pages: int) -> dict:
+    """Build the scanner ``/scan`` request body for *site*."""
+    return {
+        "domain": site.domain,
+        "additional_domains": list(site.additional_domains or []),
+        "max_pages": max_pages,
+    }
 
 
 async def _mark_failed(db, job_uuid: uuid.UUID, message: str) -> None:
