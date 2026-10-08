@@ -27,6 +27,7 @@ import httpx
 from fastapi import Request
 
 from src.config.settings import get_settings
+from src.services.client_ip import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -170,27 +171,6 @@ def detect_region_from_headers(request: Request) -> GeoResult:
             )
 
     return GeoResult(country_code=None, region=None)
-
-
-def get_client_ip(request: Request) -> str | None:
-    """Extract the real client IP from the request.
-
-    Checks X-Forwarded-For and X-Real-IP before falling back to the
-    direct connection address.
-    """
-    # X-Forwarded-For: client, proxy1, proxy2
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-
-    if request.client:
-        return request.client.host
-
-    return None
 
 
 async def lookup_ip_region(ip: str) -> GeoResult:

@@ -118,6 +118,7 @@ def create_app() -> FastAPI:
             redis_url=settings.redis_url,
             requests_per_minute=settings.rate_limit_per_minute,
             auth_requests_per_minute=10,
+            trusted_proxies=settings.trusted_proxy_networks,
         )
 
     # CORS

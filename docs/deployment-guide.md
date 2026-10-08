@@ -73,6 +73,7 @@ All ConsentOS services read configuration from environment variables (or a `.env
 | `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | No | `30` | Access token lifetime. |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | No | `7` | Refresh token lifetime. |
 | `ALLOWED_ORIGINS` | Yes | `http://localhost:5173` | Comma-separated list of origins allowed to call the API. Include the admin UI origin and every customer site that embeds the banner. Wildcards are refused when `ENVIRONMENT` is not dev/test. |
+| `TRUSTED_PROXIES` | Behind a proxy | empty | Comma-separated IPs or CIDRs of reverse proxies / load balancers whose `X-Forwarded-For` and `X-Real-IP` headers are honoured. These headers are ignored unless the direct peer matches an entry. Used for rate limiting, consent record IP pseudonymisation and GeoIP lookups. See [1.5 Reverse proxy](#15-reverse-proxy). |
 
 ### Initial Admin Bootstrap
 
@@ -170,6 +171,10 @@ ALLOWED_ORIGINS=https://cmp.example.com,https://www.example.com
 INITIAL_ADMIN_EMAIL=admin@example.com
 INITIAL_ADMIN_PASSWORD=<strong temporary password>
 
+# Reverse proxy: trust forwarded client IPs from the host proxy and
+# the admin UI's nginx (both reach the API via the Docker network)
+TRUSTED_PROXIES=127.0.0.1,172.16.0.0/12
+
 # GeoIP — if behind Cloudflare, country detection works automatically.
 # For state/region granularity behind Cloudflare Enterprise:
 # GEOIP_REGION_HEADER=cf-region-code
@@ -266,6 +271,8 @@ server {
 }
 ```
 
+**Forwarded client IPs.** The API only reads `X-Forwarded-For` / `X-Real-IP` when the connecting peer is listed in `TRUSTED_PROXIES`; otherwise it uses the peer address. With the Docker Compose stack, requests from a host proxy arrive via the Docker bridge gateway and requests proxied by the admin UI's nginx come from its container, so set `TRUSTED_PROXIES` to cover your Docker networks (the default bridge pools sit in `172.16.0.0/12`; check with `docker network inspect`). If another proxy or CDN sits in front of this one, add its address ranges too, since `X-Forwarded-For` is walked from the right and the first untrusted hop is taken as the client.
+
 ### 1.6 Integrate the banner
 
 Add the loader to every page on your customer site, **as the very first `<script>` in `<head>`** — no `async`, no `defer`:
@@ -332,6 +339,8 @@ api:
     ALLOWED_ORIGINS: "https://cmp.example.com,https://www.example.com"
     CDN_BASE_URL: "https://cmp.example.com"
     SCANNER_SERVICE_URL: "http://consentos-scanner:8001"
+    # Trust X-Forwarded-For from the ingress controller (your pod CIDR)
+    TRUSTED_PROXIES: "10.0.0.0/8"
     # GeoIP — behind Cloudflare, country resolves automatically.
     # For state-level behind Cloudflare Enterprise:
     # GEOIP_REGION_HEADER: cf-region-code

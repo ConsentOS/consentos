@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 import src.services.geoip as geoip_module
+from src.config.settings import Settings
 from src.services.geoip import (
     GeoResult,
     _is_private_ip,
@@ -222,34 +223,38 @@ class TestGetClientIp:
             request.client = None
         return request
 
-    def test_x_forwarded_for_single(self):
-        request = self._make_request({"x-forwarded-for": "1.2.3.4"})
-        assert get_client_ip(request) == "1.2.3.4"
+    def _trusting(self, value: str):
+        settings = Settings(trusted_proxies=value)
+        return patch("src.services.client_ip.get_settings", return_value=settings)
 
-    def test_x_forwarded_for_multiple(self):
-        request = self._make_request({"x-forwarded-for": "1.2.3.4, 5.6.7.8, 9.10.11.12"})
-        assert get_client_ip(request) == "1.2.3.4"
+    def test_forwarded_for_ignored_by_default(self):
+        request = self._make_request({"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1")
+        with self._trusting(""):
+            assert get_client_ip(request) == "10.0.0.1"
 
-    def test_x_real_ip(self):
-        request = self._make_request({"x-real-ip": "1.2.3.4"})
-        assert get_client_ip(request) == "1.2.3.4"
+    def test_forwarded_for_from_trusted_proxy(self):
+        request = self._make_request(
+            {"x-forwarded-for": "1.2.3.4, 5.6.7.8"}, client_host="10.0.0.1"
+        )
+        with self._trusting("10.0.0.0/8"):
+            assert get_client_ip(request) == "5.6.7.8"
 
     def test_forwarded_for_takes_priority_over_real_ip(self):
         request = self._make_request(
-            {
-                "x-forwarded-for": "1.1.1.1",
-                "x-real-ip": "2.2.2.2",
-            }
+            {"x-forwarded-for": "1.1.1.1", "x-real-ip": "2.2.2.2"}, client_host="10.0.0.1"
         )
-        assert get_client_ip(request) == "1.1.1.1"
+        with self._trusting("10.0.0.1"):
+            assert get_client_ip(request) == "1.1.1.1"
 
     def test_falls_back_to_client_host(self):
         request = self._make_request(client_host="10.0.0.1")
-        assert get_client_ip(request) == "10.0.0.1"
+        with self._trusting(""):
+            assert get_client_ip(request) == "10.0.0.1"
 
     def test_returns_none_when_no_ip(self):
         request = self._make_request()
-        assert get_client_ip(request) is None
+        with self._trusting(""):
+            assert get_client_ip(request) is None
 
 
 # ── _is_private_ip ───────────────────────────────────────────────────
@@ -555,8 +560,9 @@ class TestDetectRegionMaxmind:
         geoip_module._maxmind_initialised = True
 
         request = MagicMock()
-        request.headers = {"x-forwarded-for": "8.8.8.8"}
-        request.client = None
+        request.headers = {}
+        request.client = MagicMock()
+        request.client.host = "8.8.8.8"
 
         with (
             patch("src.services.geoip.get_settings") as mock_settings,
