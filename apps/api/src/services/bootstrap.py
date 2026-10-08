@@ -3,11 +3,11 @@
 Runs once on API startup. If ``INITIAL_ADMIN_EMAIL`` and
 ``INITIAL_ADMIN_PASSWORD`` are set and the ``users`` table is empty,
 creates an organisation and a single owner user so the operator can log
-in to the admin UI for the first time. Idempotent: once any user
-exists, this is a no-op, so the environment variables can safely remain
-set across restarts. Complements ``ADMIN_BOOTSTRAP_TOKEN`` — that gates
-runtime org creation; this creates the *initial* org + owner without
-requiring a second round-trip.
+in to the admin UI for the first time. That user is also made a platform
+admin. Idempotent: once any user exists, this is a no-op, so the
+environment variables can safely remain set across restarts. Complements
+``ADMIN_BOOTSTRAP_TOKEN``, which gates runtime org creation; this creates
+the *initial* org + owner without requiring a second round-trip.
 """
 
 import logging
@@ -67,6 +67,7 @@ async def _bootstrap(session: AsyncSession, settings: Settings) -> None:
         password_hash=hash_password(settings.initial_admin_password),
         full_name=settings.initial_admin_full_name,
         role="owner",
+        is_superuser=True,
     )
     session.add(user)
     await session.commit()

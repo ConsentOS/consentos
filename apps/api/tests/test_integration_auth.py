@@ -55,6 +55,21 @@ class TestAuthMe:
         data = resp.json()
         assert data["email"] == test_user.email
         assert data["role"] == "owner"
+        assert data["is_superuser"] is False
+
+    async def test_me_reports_platform_admin(self, db_client, superuser_headers):
+        resp = await db_client.get("/api/v1/auth/me", headers=superuser_headers)
+        assert resp.status_code == 200
+        assert resp.json()["is_superuser"] is True
+
+    async def test_profile_update_cannot_grant_platform_admin(self, db_client, auth_headers):
+        resp = await db_client.patch(
+            "/api/v1/auth/me",
+            headers=auth_headers,
+            json={"full_name": "Still An Owner", "is_superuser": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_superuser"] is False
 
     async def test_me_without_token(self, db_client):
         resp = await db_client.get("/api/v1/auth/me")

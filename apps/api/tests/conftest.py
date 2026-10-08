@@ -249,6 +249,34 @@ async def other_org_headers(_test_engine, _setup_db):
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest_asyncio.fixture(loop_scope="session")
+async def superuser_headers(_test_engine, _setup_db, test_org):
+    """HTTP headers for an owner who is also a platform admin."""
+    from src.models.user import User
+    from src.services.auth import create_access_token, hash_password
+
+    async with AsyncSession(_test_engine, expire_on_commit=False) as session:
+        user = User(
+            id=uuid.uuid4(),
+            email=f"platform-{uuid.uuid4().hex[:8]}@test.com",
+            password_hash=hash_password("TestPassword123"),
+            full_name="Platform Admin",
+            role="owner",
+            organisation_id=test_org.id,
+            is_superuser=True,
+        )
+        session.add(user)
+        await session.commit()
+
+    token = create_access_token(
+        user_id=str(user.id),
+        organisation_id=str(user.organisation_id),
+        role=user.role,
+        email=user.email,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
 # ── Shared helper for creating sites in integration tests ────────────
 
 

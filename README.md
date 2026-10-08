@@ -94,6 +94,8 @@ make up
 make seed
 ```
 
+Adding, editing or deleting entries through the API is limited to platform admins. See [Platform Admins](docs/deployment-guide.md#platform-admins) for how to grant the flag.
+
 You can now log in at `http://localhost:5173` with the credentials you set above.
 
 | Service   | URL                        |

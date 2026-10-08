@@ -14,8 +14,10 @@ Matching priority (highest first):
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -28,6 +30,9 @@ from src.models.cookie import (
     CookieCategory,
     KnownCookie,
 )
+from src.schemas.validators import validate_regex_pattern
+
+logger = logging.getLogger(__name__)
 
 
 class MatchSource(StrEnum):
@@ -37,6 +42,15 @@ class MatchSource(StrEnum):
     KNOWN_EXACT = "known_exact"
     KNOWN_REGEX = "known_regex"
     UNMATCHED = "unmatched"
+
+
+@dataclass(frozen=True)
+class CompiledKnownCookie:
+    """A regex known cookie with its patterns compiled once per run."""
+
+    known: KnownCookie
+    name_regex: re.Pattern[str]
+    domain_regex: re.Pattern[str]
 
 
 @dataclass
@@ -66,15 +80,52 @@ async def _load_allow_list(
     return list(result.scalars().all())
 
 
+def _compile_known(known: KnownCookie) -> CompiledKnownCookie | None:
+    """Compile a regex known cookie, or return None if its patterns are unusable.
+
+    Patterns are validated on save, but rows written before that check
+    existed (or directly to the database) may still be invalid, so they
+    are skipped here rather than failing the whole classification run.
+    """
+    try:
+        name_pattern = validate_regex_pattern(known.name_pattern)
+        domain_pattern = validate_regex_pattern(known.domain_pattern)
+    except ValueError as exc:
+        logger.warning(
+            "Skipping known cookie %s (%r, %r): %s",
+            known.id,
+            known.name_pattern,
+            known.domain_pattern,
+            exc,
+        )
+        return None
+    return CompiledKnownCookie(
+        known=known,
+        name_regex=re.compile(name_pattern, re.IGNORECASE),
+        domain_regex=re.compile(domain_pattern, re.IGNORECASE),
+    )
+
+
+def _ensure_compiled(
+    regex_known: Sequence[CompiledKnownCookie | KnownCookie],
+) -> list[CompiledKnownCookie]:
+    """Compile any entries that are not already compiled, preserving order."""
+    compiled = (
+        entry if isinstance(entry, CompiledKnownCookie) else _compile_known(entry)
+        for entry in regex_known
+    )
+    return [entry for entry in compiled if entry is not None]
+
+
 async def _load_known_cookies(
     db: AsyncSession,
-) -> tuple[list[KnownCookie], list[KnownCookie]]:
-    """Load known cookies, split into exact and regex lists."""
+) -> tuple[list[KnownCookie], list[CompiledKnownCookie]]:
+    """Load known cookies, split into exact and compiled regex lists."""
     result = await db.execute(select(KnownCookie))
     all_known = list(result.scalars().all())
 
     exact = [k for k in all_known if not k.is_regex]
-    regex = [k for k in all_known if k.is_regex]
+    regex = _ensure_compiled([k for k in all_known if k.is_regex])
     return exact, regex
 
 
@@ -92,7 +143,6 @@ def _match_pattern(pattern: str, value: str) -> bool:
     Patterns support:
       - Exact match (e.g. "_ga")
       - Wildcard with * (e.g. "_ga*", "*.google.com")
-      - Regex if it contains regex-specific characters
     """
     if not pattern or not value:
         return False
@@ -104,20 +154,39 @@ def _match_pattern(pattern: str, value: str) -> bool:
     if pattern_lower == value_lower:
         return True
 
-    # Wildcard: convert * to regex .*
     if "*" in pattern_lower:
-        regex_pattern = "^" + re.escape(pattern_lower).replace(r"\*", ".*") + "$"
-        return bool(re.match(regex_pattern, value_lower))
+        return _wildcard_match(pattern_lower, value_lower)
 
     return False
 
 
-def _match_regex(pattern: str, value: str) -> bool:
-    """Match a value against a regex pattern (case-insensitive)."""
-    try:
-        return bool(re.match(pattern, value, re.IGNORECASE))
-    except re.error:
-        return False
+def _wildcard_match(pattern: str, value: str) -> bool:
+    """Match ``value`` against ``pattern`` where ``*`` matches any run of characters.
+
+    Uses a single pass that retries from the last ``*`` instead of a
+    regex, so time stays proportional to the pattern and value lengths
+    multiplied, however many ``*`` the pattern contains.
+    """
+    p = v = 0
+    star = -1
+    resume = 0
+    while v < len(value):
+        if p < len(pattern) and pattern[p] == "*":
+            star = p
+            resume = v
+            p += 1
+        elif p < len(pattern) and pattern[p] == value[v]:
+            p += 1
+            v += 1
+        elif star != -1:
+            p = star + 1
+            resume += 1
+            v = resume
+        else:
+            return False
+    while p < len(pattern) and pattern[p] == "*":
+        p += 1
+    return p == len(pattern)
 
 
 def _match_allow_list(
@@ -151,14 +220,12 @@ def _match_exact_known(
 def _match_regex_known(
     cookie_name: str,
     cookie_domain: str,
-    regex_known: list[KnownCookie],
+    regex_known: Sequence[CompiledKnownCookie],
 ) -> KnownCookie | None:
     """Find a regex match in the known cookies database."""
-    for known in regex_known:
-        name_match = _match_regex(known.name_pattern, cookie_name)
-        domain_match = _match_regex(known.domain_pattern, cookie_domain)
-        if name_match and domain_match:
-            return known
+    for entry in regex_known:
+        if entry.name_regex.match(cookie_name) and entry.domain_regex.match(cookie_domain):
+            return entry.known
     return None
 
 
@@ -167,13 +234,17 @@ def classify_cookie(
     cookie_domain: str,
     allow_list: list[CookieAllowListEntry],
     exact_known: list[KnownCookie],
-    regex_known: list[KnownCookie],
+    regex_known: Sequence[CompiledKnownCookie | KnownCookie],
     category_map: dict[uuid.UUID, CookieCategory],
 ) -> ClassificationResult:
     """Classify a single cookie against allow-list and known cookies DB.
 
     This is a pure function — all data is passed in, no DB calls.
+    ``regex_known`` entries loaded by ``_load_known_cookies`` arrive
+    precompiled; plain ``KnownCookie`` rows are compiled here.
     """
+    compiled_regex = _ensure_compiled(regex_known)
+
     # 0. ConsentOS's own cookies are always necessary. The banner's
     #    blocker already treats ``_consentos_*`` as exempt; the
     #    classifier must agree so the admin UI shows them in the
@@ -224,7 +295,7 @@ def classify_cookie(
         )
 
     # 3. Check regex known cookies
-    regex_match = _match_regex_known(cookie_name, cookie_domain, regex_known)
+    regex_match = _match_regex_known(cookie_name, cookie_domain, compiled_regex)
     if regex_match:
         cat = category_map.get(regex_match.category_id)
         return ClassificationResult(

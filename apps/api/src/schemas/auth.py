@@ -45,6 +45,7 @@ class ProfileResponse(BaseModel):
     full_name: str
     role: str
     organisation_id: uuid.UUID
+    is_superuser: bool = False
 
     model_config = {"from_attributes": True}
 

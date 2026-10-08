@@ -6,7 +6,9 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from src.schemas.validators import validate_regex_pattern
 
 # ─── Cookie category schemas ───
 
@@ -150,6 +152,13 @@ class KnownCookieCreate(BaseModel):
     vendor: str | None = Field(None, max_length=255)
     description: str | None = None
     is_regex: bool = False
+
+    @model_validator(mode="after")
+    def _validate_regex_patterns(self) -> KnownCookieCreate:
+        if self.is_regex:
+            validate_regex_pattern(self.name_pattern)
+            validate_regex_pattern(self.domain_pattern)
+        return self
 
 
 class KnownCookieUpdate(BaseModel):

@@ -13,7 +13,11 @@ import pytest
 from src.schemas.org_config import OrgConfigUpdate
 from src.schemas.site import SiteConfigUpdate
 from src.schemas.site_group_config import SiteGroupConfigUpdate
-from src.schemas.validators import coerce_blank_to_none
+from src.schemas.validators import (
+    MAX_REGEX_PATTERN_LENGTH,
+    coerce_blank_to_none,
+    validate_regex_pattern,
+)
 
 
 class TestCoerceBlankToNone:
@@ -78,3 +82,41 @@ class TestOrgAndGroupBlankCoercion:
     def test_group_update_coerces_blank(self, field: str) -> None:
         parsed = SiteGroupConfigUpdate.model_validate({field: ""})
         assert getattr(parsed, field) is None
+
+
+class TestValidateRegexPattern:
+    @pytest.mark.parametrize(
+        "pattern",
+        [r"_hj.*", r"_pk_id\..*", r".*", r"(_ga|_gid)", r"_ga_[A-Z0-9]+", r"(ab)?", r"(a|b)+"],
+    )
+    def test_accepts_ordinary_patterns(self, pattern):
+        assert validate_regex_pattern(pattern) == pattern
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            r"(a+)+",
+            r"(a*)*",
+            r"(a|aa)+",
+            r"(?:ab|cd){2,}",
+            r"(\w+\s?)*",
+            r"x(?=(a+)+)",
+            r"(.*a){20}",
+        ],
+    )
+    def test_rejects_nested_quantifiers(self, pattern):
+        with pytest.raises(ValueError, match="must not repeat"):
+            validate_regex_pattern(pattern)
+
+    @pytest.mark.parametrize("pattern", [r"[abc", r"(unclosed", r"*start", r"a{99999999999}"])
+    def test_rejects_invalid_syntax(self, pattern):
+        with pytest.raises(ValueError, match="Invalid regular expression"):
+            validate_regex_pattern(pattern)
+
+    def test_rejects_overlong_pattern(self):
+        with pytest.raises(ValueError, match="at most"):
+            validate_regex_pattern("a" * (MAX_REGEX_PATTERN_LENGTH + 1))
+
+    def test_accepts_pattern_at_length_limit(self):
+        pattern = "a" * MAX_REGEX_PATTERN_LENGTH
+        assert validate_regex_pattern(pattern) == pattern
