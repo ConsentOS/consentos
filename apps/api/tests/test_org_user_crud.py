@@ -14,7 +14,6 @@ class TestOrganisationSchemas:
         org = OrganisationCreate(name="Acme Corp", slug="acme-corp")
         assert org.name == "Acme Corp"
         assert org.slug == "acme-corp"
-        assert org.billing_plan == "free"
 
     def test_create_invalid_slug(self):
         with pytest.raises(ValidationError):
@@ -37,7 +36,6 @@ class TestOrganisationSchemas:
             name="Test",
             slug="test",
             contact_email=None,
-            billing_plan="free",
             created_at=now,
             updated_at=now,
         )

@@ -12,7 +12,6 @@ class Organisation(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    billing_plan: Mapped[str] = mapped_column(String(50), server_default="free", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
