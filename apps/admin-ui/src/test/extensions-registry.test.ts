@@ -108,6 +108,18 @@ describe('UI extension registry', () => {
     });
   });
 
+  describe('registerAnalyticsSink', () => {
+    it('routes admin UI analytics events to the registered sink', async () => {
+      const analytics = await import('../services/analytics');
+      const sink = vi.fn();
+
+      registry.registerAnalyticsSink(sink);
+      analytics.trackPageView('/sites');
+
+      expect(sink).toHaveBeenCalledWith({ event: 'page_view', page_path: '/sites', page_title: undefined });
+    });
+  });
+
   describe('discoverExtensions', () => {
     it('does not throw and is callable', () => {
       // discoverExtensions uses import.meta.glob which is Vite-specific.

@@ -271,7 +271,7 @@ Services in Docker Compose:
 - `scanner` — Playwright scanner service
 - `postgres` — PostgreSQL 16 on port 5432
 - `redis` — Redis on port 6379
-- `admin-ui` — Vite dev server on port 5173 (also dog-foods the banner)
+- `admin-ui` — Vite dev server on port 5173 (also serves the banner scripts)
 
 ## Implementation Phases
 
