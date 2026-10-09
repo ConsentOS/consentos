@@ -403,6 +403,8 @@ secrets:
   postgresqlPassword: "<your managed DB password>"
 ```
 
+The chart refuses to render while `secrets.jwtSecretKey` is empty or still set to the `CHANGE-ME-in-production` placeholder. Set `secrets.existingSecret` instead to supply the secret yourself.
+
 ### 2.4 Install the chart
 
 ```bash
