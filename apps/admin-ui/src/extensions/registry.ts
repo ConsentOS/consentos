@@ -129,6 +129,14 @@ export function registerAuthUiProvider(provider: AuthUiProvider): void {
   _authProvider = provider;
 }
 
+/**
+ * Register a destination for admin UI analytics events.
+ *
+ * Re-exported here so extensions use a single registration surface.
+ */
+export { registerAnalyticsSink } from '../services/analytics';
+export type { AnalyticsEvent, AnalyticsSink } from '../services/analytics';
+
 /* ------------------------------------------------------------------ */
 /*  Query API                                                          */
 /* ------------------------------------------------------------------ */
