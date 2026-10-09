@@ -1,5 +1,7 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
+import { getAuthUiProvider } from '../extensions/registry';
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 const apiClient = axios.create({
@@ -30,8 +32,9 @@ function clearTokens(): void {
 }
 
 // ── Request interceptor: attach bearer token ───────────────────────
-apiClient.interceptors.request.use((config) => {
-  const token = getAccessToken();
+apiClient.interceptors.request.use(async (config) => {
+  const provider = getAuthUiProvider();
+  const token = provider ? await provider.getToken() : getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -73,6 +76,10 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const original = error.config as RetryableRequest | undefined;
     const status = error.response?.status;
+
+    if (status === 401 && getAuthUiProvider()) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
 
     // Not a 401, or we've already retried — give up and propagate.
     if (status !== 401 || !original || original._retry) {

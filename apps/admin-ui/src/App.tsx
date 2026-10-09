@@ -20,6 +20,7 @@ import SiteGroupDetailPage from './pages/SiteGroupDetailPage';
 import SitesPage from './pages/SitesPage';
 import { useAuthStore } from './stores/auth';
 import { discoverExtensions, getPages } from './extensions/registry';
+import { LoadingState } from './components/ui/loading-state.tsx';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,15 +37,21 @@ function AppRoutes() {
   const [extensionsReady, setExtensionsReady] = useState(false);
 
   useEffect(() => {
-    loadUser();
-    discoverExtensions().then(() => setExtensionsReady(true));
+    void discoverExtensions().then(() => {
+      void loadUser();
+      setExtensionsReady(true);
+    });
   }, [loadUser]);
 
   useEffect(() => {
     trackPageView(location.pathname);
   }, [location.pathname]);
 
-  const extensionPages = extensionsReady ? getPages() : [];
+  if (!extensionsReady) {
+    return <LoadingState message="Loading..." />;
+  }
+
+  const extensionPages = getPages();
 
   return (
     <Routes>

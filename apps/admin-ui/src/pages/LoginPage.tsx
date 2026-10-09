@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import { useAuthStore } from '../stores/auth';
+import { getAuthUiProvider } from '../extensions/registry';
 import { Button } from '../components/ui/button.tsx';
 import { Input } from '../components/ui/input.tsx';
 import { FormField } from '../components/ui/form-field.tsx';
@@ -10,7 +11,8 @@ import { Alert } from '../components/ui/alert.tsx';
 import { Card, CardContent } from '../components/ui/card.tsx';
 
 export default function LoginPage() {
-  const { isAuthenticated, isLoading, login } = useAuthStore();
+  const { isAuthenticated, isLoading, login, providerSessionUnprovisioned } =
+    useAuthStore();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,6 +20,12 @@ export default function LoginPage() {
 
   if (isAuthenticated) {
     return <Navigate to="/sites" replace />;
+  }
+
+  const provider = getAuthUiProvider();
+  if (provider) {
+    const ProviderLogin = provider.LoginComponent;
+    return <ProviderLogin unprovisioned={providerSessionUnprovisioned} />;
   }
 
   const handleSubmit = async (e: FormEvent) => {
