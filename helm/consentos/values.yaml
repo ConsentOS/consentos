@@ -127,6 +127,7 @@ secrets:
   # Provide an existing secret name, or leave empty to create one
   existingSecret: ""
   # Values used when creating the secret (ignored if existingSecret is set)
+  # jwtSecretKey must be replaced; the chart will not render with this placeholder.
   jwtSecretKey: "CHANGE-ME-in-production"
   postgresqlPassword: "consentos"
 

@@ -20,6 +20,7 @@ jobs:
       scanner: ${{ steps.filter.outputs.scanner }}
       banner: ${{ steps.filter.outputs.banner }}
       admin-ui: ${{ steps.filter.outputs.admin-ui }}
+      helm: ${{ steps.filter.outputs.helm }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -34,6 +35,22 @@ jobs:
               - 'apps/banner/**'
             admin-ui:
               - 'apps/admin-ui/**'
+            helm:
+              - 'helm/**'
+
+  # ── Helm ───────────────────────────────────────────────────────────
+  helm-test:
+    name: Helm Chart
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - run: helm lint helm/consentos --set secrets.jwtSecretKey=lint
+      - run: helm/test-chart.sh
 
   # ── API ────────────────────────────────────────────────────────────
   api-lint:
