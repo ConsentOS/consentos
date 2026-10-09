@@ -59,6 +59,34 @@ export interface NavExtension {
   order?: number;
 }
 
+/**
+ * A pluggable authentication provider for the admin UI.
+ *
+ * Mirrors the API-side ``AuthProvider`` protocol: when an extension
+ * registers one, the UI sources its bearer token from the provider and
+ * replaces the built-in login page. Without one, the default
+ * email/password + refresh-token flow is used.
+ */
+export interface AuthUiProvider {
+  /**
+   * Return the bearer token to attach to API requests, or null when
+   * unauthenticated. Called per request, so implementations should
+   * cache and refresh internally.
+   */
+  getToken(): Promise<string | null>;
+  /** End the session with the external identity provider. */
+  logout(): Promise<void>;
+  /**
+   * Component rendered at /login instead of the built-in form.
+   *
+   * Receives ``unprovisioned``: true when the provider holds a valid
+   * session that this deployment rejected, so signing in again cannot
+   * help. The provider decides what to show, for example prompting the
+   * user to complete setup, since only it knows what is missing.
+   */
+  LoginComponent: ComponentType<{ unprovisioned?: boolean }>;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Internal state                                                     */
 /* ------------------------------------------------------------------ */
@@ -66,6 +94,7 @@ export interface NavExtension {
 const _tabs: TabExtension[] = [];
 const _pages: PageExtension[] = [];
 const _navItems: NavExtension[] = [];
+let _authProvider: AuthUiProvider | null = null;
 
 /* ------------------------------------------------------------------ */
 /*  Registration API                                                   */
@@ -92,6 +121,14 @@ export function registerNavItem(item: NavExtension): void {
   }
 }
 
+/** Register the authentication provider. Only one may be registered. */
+export function registerAuthUiProvider(provider: AuthUiProvider): void {
+  if (_authProvider !== null) {
+    throw new Error('An auth UI provider is already registered; only one is allowed.');
+  }
+  _authProvider = provider;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Query API                                                          */
 /* ------------------------------------------------------------------ */
@@ -109,6 +146,11 @@ export function getPages(): readonly PageExtension[] {
 /** Return all registered nav items, sorted by order. */
 export function getNavItems(): readonly NavExtension[] {
   return [..._navItems].sort((a, b) => (a.order ?? 200) - (b.order ?? 200));
+}
+
+/** Return the registered auth provider, or null for the default flow. */
+export function getAuthUiProvider(): AuthUiProvider | null {
+  return _authProvider;
 }
 
 /* ------------------------------------------------------------------ */
