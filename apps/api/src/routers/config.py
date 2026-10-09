@@ -490,7 +490,7 @@ async def publish_config(
         group_defaults=group_defaults,
     )
 
-    # Allow extensions to enrich the published config (e.g. A/B test data)
+    # Allow extensions to enrich the published config
     registry = get_registry()
     for enricher in registry.config_enrichers:
         await enricher(site_id, db, resolved)
