@@ -18,6 +18,7 @@ from src.schemas.consent import (
 from src.services.client_ip import get_client_ip
 from src.services.dependencies import require_role
 from src.services.pseudonymisation import pseudonymise
+from src.services.site_domains import require_request_from_site
 
 router = APIRouter(prefix="/consent", tags=["consent"])
 
@@ -28,7 +29,14 @@ async def record_consent(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> ConsentRecord:
-    """Record a consent event from the banner. Public endpoint (no auth required)."""
+    """Record a consent event from the banner. Public endpoint (no auth required).
+
+    The site must exist and be active. When the request carries a usable
+    ``Origin`` or ``Referer`` header, its host must belong to the site.
+    """
+    site = await _load_active_site(body.site_id, db)
+    require_request_from_site(request, site)
+
     # Pseudonymise IP and user agent with HMAC so the resulting values
     # cannot be reversed without the server-side secret.
     client_ip = get_client_ip(request) or ""
@@ -57,6 +65,21 @@ async def record_consent(
         await hook(db, record)
 
     return record
+
+
+async def _load_active_site(site_id: uuid.UUID, db: AsyncSession) -> Site:
+    """Load an active, non-deleted site or raise 404."""
+    result = await db.execute(
+        select(Site).where(
+            Site.id == site_id,
+            Site.is_active.is_(True),
+            Site.deleted_at.is_(None),
+        )
+    )
+    site = result.scalar_one_or_none()
+    if site is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
+    return site
 
 
 async def _load_record_for_org(

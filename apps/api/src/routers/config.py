@@ -15,6 +15,7 @@ from src.models.site_group import SiteGroup
 from src.models.site_group_config import SiteGroupConfig
 from src.models.translation import Translation
 from src.schemas.auth import CurrentUser
+from src.schemas.cookie import ReviewStatus
 from src.schemas.site import SiteConfigResponse
 from src.services.config_resolver import (
     CONFIG_FIELDS,
@@ -314,6 +315,8 @@ async def get_public_cookies(
     by_cat_id: dict[uuid.UUID, list[Cookie]] = {}
     uncategorised: list[Cookie] = []
     for cookie in cookies:
+        if cookie.review_status == ReviewStatus.rejected:
+            continue
         if cookie.category_id:
             by_cat_id.setdefault(cookie.category_id, []).append(cookie)
         else:

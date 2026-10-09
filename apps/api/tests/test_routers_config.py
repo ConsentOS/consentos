@@ -352,3 +352,75 @@ class TestVisitorGeo:
         data = resp.json()
         assert data["country_code"] is None
         assert data["region"] is None
+
+
+def _mock_cookie(name, review_status, category_id=None):
+    cookie = MagicMock()
+    cookie.name = name
+    cookie.domain = ".example.com"
+    cookie.storage_type = "cookie"
+    cookie.description = None
+    cookie.vendor = None
+    cookie.category_id = category_id
+    cookie.review_status = review_status
+    return cookie
+
+
+def _scalars_result(items):
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = items
+    return result
+
+
+class TestPublicCookies:
+    @pytest.mark.asyncio
+    async def test_rejected_cookies_hidden_and_pending_shown(self, mock_app):
+        site = MagicMock()
+        site.display_name = "Example"
+        site.domain = "example.com"
+        category = MagicMock()
+        category.id = uuid.uuid4()
+        category.slug = "necessary"
+        category.name = "Necessary"
+        category.description = ""
+        category.is_essential = True
+        cookies = [
+            _mock_cookie("pending_uncategorised", "pending"),
+            _mock_cookie("approved_uncategorised", "approved"),
+            _mock_cookie("rejected_uncategorised", "rejected"),
+            _mock_cookie("pending_categorised", "pending", category_id=category.id),
+            _mock_cookie("rejected_categorised", "rejected", category_id=category.id),
+        ]
+        site_result = MagicMock()
+        site_result.scalar_one_or_none.return_value = site
+        config_result = MagicMock()
+        config_result.scalar_one_or_none.return_value = None
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                site_result,
+                config_result,
+                _scalars_result([category]),
+                _scalars_result(cookies),
+            ]
+        )
+
+        with (
+            patch("src.routers.config._get_site_org_id", AsyncMock(return_value=None)),
+            patch("src.routers.config._get_site_group_id", AsyncMock(return_value=None)),
+            patch(
+                "src.routers.config.resolve_config",
+                return_value={"enabled_categories": ["necessary"]},
+            ),
+        ):
+            async with await _client(mock_app, db) as client:
+                resp = await client.get(f"/api/v1/config/sites/{uuid.uuid4()}/cookies")
+
+        assert resp.status_code == 200
+        names = {
+            cat["slug"]: [c["name"] for c in cat["cookies"]] for cat in resp.json()["categories"]
+        }
+        assert names == {
+            "necessary": ["pending_categorised"],
+            "uncategorised": ["pending_uncategorised", "approved_uncategorised"],
+        }
