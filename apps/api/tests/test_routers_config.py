@@ -141,7 +141,7 @@ class TestPublishConfig:
     @pytest.mark.asyncio
     async def test_publish_config_success(self, mock_app):
         config = _mock_config()
-        # Publish does: config query, org_config query, group_id, active A/B test query
+        # Publish does: config query, org_config query, group_id, extension query
         db = _mock_db_sequence(config, None, None, None)
 
         mock_result = MagicMock()

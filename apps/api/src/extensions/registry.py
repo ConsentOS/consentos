@@ -171,8 +171,7 @@ def register_config_enricher(enricher: Callable) -> None:
     """Register a callable that enriches published config.
 
     The callable signature is ``async (site_id: UUID, db: AsyncSession, config: dict) -> None``.
-    It should mutate *config* in-place to add extension-specific data
-    (e.g. A/B test variants).
+    It should mutate *config* in-place to add extension-specific data.
     """
     _registry.add_config_enricher(enricher)
 

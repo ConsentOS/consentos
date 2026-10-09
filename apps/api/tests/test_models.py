@@ -49,7 +49,6 @@ def test_organisation_columns():
     assert "name" in column_names
     assert "slug" in column_names
     assert "contact_email" in column_names
-    assert "billing_plan" in column_names
     assert "created_at" in column_names
     assert "updated_at" in column_names
     assert "deleted_at" in column_names

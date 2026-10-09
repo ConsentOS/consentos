@@ -179,7 +179,6 @@ def build_public_config(
         "terms_url": resolved.get("terms_url"),
         "consent_expiry_days": resolved["consent_expiry_days"],
         "consent_group_id": resolved.get("consent_group_id"),
-        "ab_test": resolved.get("ab_test"),
         # Public name is ``enabled_categories`` here; the banner schema
         # converts that to ``enabledCategories`` when it serialises.
         "enabled_categories": _normalise_enabled_categories(resolved.get("enabled_categories")),

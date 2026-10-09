@@ -27,7 +27,6 @@ def _mock_org(**overrides):
     org.name = overrides.get("name", "Test Org")
     org.slug = overrides.get("slug", "test-org")
     org.contact_email = overrides.get("contact_email")
-    org.billing_plan = overrides.get("billing_plan", "free")
     org.deleted_at = None
     org.created_at = datetime.now(UTC)
     org.updated_at = datetime.now(UTC)
