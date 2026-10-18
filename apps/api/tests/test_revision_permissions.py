@@ -1,7 +1,8 @@
 """Who may do what with drafts and revisions (mocked database).
 
 Editors and viewers can see the draft, the diff and the history; only
-owners and admins can publish, bulk publish, roll back or discard.
+owners and admins can publish, bulk publish, roll back, discard or make
+a preview link.
 """
 
 import uuid
@@ -22,6 +23,7 @@ WRITES = [
     ("POST", f"/api/v1/config/sites/{SITE}/publish", {"expected_content_hash": HASH}),
     ("POST", f"/api/v1/config/sites/{SITE}/revisions/{REVISION}/rollback", {}),
     ("POST", f"/api/v1/config/sites/{SITE}/discard", None),
+    ("POST", f"/api/v1/config/sites/{SITE}/preview", None),
     (
         "POST",
         "/api/v1/config/bulk-publish",

@@ -170,7 +170,8 @@ async function init(): Promise<void> {
     buildDefaultConfig(siteId),
   );
 
-  const existingConsent = readConsent();
+  // A preview shows the banner as a new visitor would see it.
+  const existingConsent = config.preview ? null : readConsent();
 
   // Check if existing consent needs re-consent. We still load
   // translations and install the floating button even when no banner
@@ -275,7 +276,7 @@ async function init(): Promise<void> {
   // there's no local consent, try the iframe bridge before showing
   // the banner. The bridge reads a shared cookie on the API domain
   // that may have been written by another site in the same group.
-  if (!existingConsent && config.consent_group_id) {
+  if (!existingConsent && config.consent_group_id && !config.preview) {
     const bridgeOrigin = config.consent_bridge_url ?? apiBase;
     const bridgeConsent = await tryConsentBridge(bridgeOrigin, config.consent_group_id);
     if (bridgeConsent) {
@@ -650,18 +651,22 @@ function handleConsent(
     gpcResult?.honoured,
   );
 
-  // Write first-party cookie + the IAB-standard euconsent-v2 cookie
-  // when TCF is enabled (vendors that don't use postMessage read it
-  // directly from document.cookie).
-  writeConsent(state, config.consent_expiry_days);
-  if (tcString) {
-    writeTcfCookie(tcString, config.consent_expiry_days);
-  }
+  // A preview applies the choice to this page only: nothing is stored,
+  // shared or recorded, so the holder's real consent is left alone.
+  if (!config.preview) {
+    // Write first-party cookie + the IAB-standard euconsent-v2 cookie
+    // when TCF is enabled (vendors that don't use postMessage read it
+    // directly from document.cookie).
+    writeConsent(state, config.consent_expiry_days);
+    if (tcString) {
+      writeTcfCookie(tcString, config.consent_expiry_days);
+    }
 
-  // Push consent to the cross-domain bridge iframe so other sites
-  // in the same group pick it up on their next load.
-  if (config.consent_group_id) {
-    storeConsentInBridge(state, config.consent_expiry_days);
+    // Push consent to the cross-domain bridge iframe so other sites
+    // in the same group pick it up on their next load.
+    if (config.consent_group_id) {
+      storeConsentInBridge(state, config.consent_expiry_days);
+    }
   }
 
   // Release blocked scripts for accepted categories
@@ -673,31 +678,33 @@ function handleConsent(
   }
 
   // Update Shopify Customer Privacy API
-  if (config.shopify_privacy_enabled) {
+  if (config.shopify_privacy_enabled && !config.preview) {
     updateShopifyConsent(accepted);
   }
 
   // Post consent to API (fire and forget)
   const { siteId, apiBase } = window.__consentos;
-  fetch(`${apiBase}/api/v1/consent/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      site_id: siteId,
-      visitor_id: state.visitorId,
-      action: determineAction(accepted, rejected),
-      categories_accepted: accepted,
-      categories_rejected: rejected,
-      gcm_state: gcmState,
-      gpc_detected: gpcResult?.detected ?? false,
-      gpc_honoured: gpcResult?.honoured ?? false,
-      gpp_string: gppString ?? null,
-      page_url: window.location.href,
-      // The published revision the visitor consented against; empty
-      // while the site isn't published yet.
-      config_revision_id: config.revision_id ?? null,
-    }),
-  }).catch((err) => console.warn('[ConsentOS] Failed to record consent:', err));
+  if (!config.preview) {
+    fetch(`${apiBase}/api/v1/consent/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        site_id: siteId,
+        visitor_id: state.visitorId,
+        action: determineAction(accepted, rejected),
+        categories_accepted: accepted,
+        categories_rejected: rejected,
+        gcm_state: gcmState,
+        gpc_detected: gpcResult?.detected ?? false,
+        gpc_honoured: gpcResult?.honoured ?? false,
+        gpp_string: gppString ?? null,
+        page_url: window.location.href,
+        // The published revision the visitor consented against; empty
+        // while the site isn't published yet.
+        config_revision_id: config.revision_id ?? null,
+      }),
+    }).catch((err) => console.warn('[ConsentOS] Failed to record consent:', err));
+  }
 
   // Dispatch event
   document.dispatchEvent(

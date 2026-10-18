@@ -13,6 +13,7 @@ const mockGetDraftStatus = vi.fn<(siteId: string) => Promise<DraftStatus>>();
 const mockGetDiff = vi.fn<(siteId: string, params?: unknown) => Promise<ConfigDiff>>();
 const mockPublish = vi.fn();
 const mockDiscard = vi.fn();
+const mockPreview = vi.fn();
 
 vi.mock('../api/revisions', async () => {
   const actual = await vi.importActual<typeof import('../api/revisions')>('../api/revisions');
@@ -23,6 +24,7 @@ vi.mock('../api/revisions', async () => {
     getDiff: (siteId: string, params?: unknown) => mockGetDiff(siteId, params),
     publishDraft: (...args: unknown[]) => mockPublish(...args),
     discardDraft: (siteId: string) => mockDiscard(siteId),
+    createPreviewLink: (siteId: string) => mockPreview(siteId),
   };
 });
 
@@ -254,6 +256,33 @@ describe('PublishDialog', () => {
     expect(await screen.findByText('Only owners and admins can publish, roll back or discard changes.')).toBeInTheDocument();
   });
 
+  it('creates a preview link for the real site', async () => {
+    mockGetDiff.mockResolvedValue(diff());
+    mockPreview.mockResolvedValue({
+      token: 't',
+      expires_at: '2026-10-18T13:30:00Z',
+      url: 'https://shop.test/?consentos_preview=t',
+    });
+    renderWithQuery(<PublishDialog siteId="site-1" onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview on your site' }));
+
+    const link = await screen.findByRole('link', { name: 'Open your site with these changes' });
+    expect(link).toHaveAttribute('href', 'https://shop.test/?consentos_preview=t');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(mockPreview).toHaveBeenCalledWith('site-1');
+  });
+
+  it('says when a preview link could not be made', async () => {
+    mockGetDiff.mockResolvedValue(diff());
+    mockPreview.mockRejectedValue(new Error('network'));
+    renderWithQuery(<PublishDialog siteId="site-1" onClose={() => {}} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Preview on your site' }));
+
+    expect(await screen.findByText("Couldn't create a preview link.")).toBeInTheDocument();
+  });
+
   it('lets editors review but not publish', async () => {
     signInAs('editor');
     mockGetDiff.mockResolvedValue(diff());
@@ -262,6 +291,7 @@ describe('PublishDialog', () => {
     await screen.findByText('Terms link');
     expect(screen.getByText('Only owners and admins can publish.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Publish' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Preview on your site' })).not.toBeInTheDocument();
   });
 });
 

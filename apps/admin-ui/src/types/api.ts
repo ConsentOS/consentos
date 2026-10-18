@@ -510,3 +510,9 @@ export interface BulkPublishResponse {
   batch_id: string;
   results: BulkPublishResult[];
 }
+
+export interface PreviewLink {
+  token: string;
+  expires_at: string;
+  url: string;
+}

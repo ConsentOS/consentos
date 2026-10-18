@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { getDiff, publishDraft, publishErrorMessage } from '../api/revisions';
+import { createPreviewLink, getDiff, publishDraft, publishErrorMessage } from '../api/revisions';
 import { useAuthStore } from '../stores/auth';
 import ConfigDiffView from './ConfigDiffView';
 import { canPublish } from './permissions';
@@ -49,6 +49,9 @@ export default function PublishDialog({ siteId, onClose }: Props) {
     },
   });
 
+  const previewMutation = useMutation({ mutationFn: () => createPreviewLink(siteId) });
+  const previewLink = previewMutation.data;
+
   function reviewAgain() {
     mutation.reset();
     diffQuery.refetch();
@@ -76,6 +79,39 @@ export default function PublishDialog({ siteId, onClose }: Props) {
 
         {allowed ? (
           <>
+            <div className="rounded-md border border-border-subtle p-3">
+              {previewLink ? (
+                <p>
+                  <a
+                    href={previewLink.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-copper hover:underline"
+                  >
+                    Open your site with these changes
+                  </a>
+                  <span className="block text-xs text-text-secondary">
+                    Only you see them, until{' '}
+                    {new Date(previewLink.expires_at).toLocaleTimeString()}. Nothing is saved
+                    as consent while previewing.
+                  </span>
+                </p>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={previewMutation.isPending}
+                  onClick={() => previewMutation.mutate()}
+                >
+                  {previewMutation.isPending ? 'Creating link...' : 'Preview on your site'}
+                </Button>
+              )}
+              {previewMutation.isError && (
+                <p className="mt-1 text-xs text-status-error-fg">
+                  {publishErrorMessage(previewMutation.error, "Couldn't create a preview link.")}
+                </p>
+              )}
+            </div>
             <label className="block">
               <span className="mb-1 block font-medium">Note (optional)</span>
               <Textarea
