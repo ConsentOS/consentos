@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { deleteSite } from '../api/sites';
+import InstallationStatus from './InstallationStatus';
 import InstallGuide from './InstallGuide';
 import LiveRevisionCard from './LiveRevisionCard';
 import { Button } from './ui/button';
@@ -57,6 +58,11 @@ export default function SiteOverviewTab({ site, config }: Props) {
       </div>
 
       <LiveRevisionCard siteId={site.id} />
+
+      <Card className="p-6">
+        <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">Installation</h3>
+        <InstallationStatus siteId={site.id} />
+      </Card>
 
       <Card className="p-6">
         <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">

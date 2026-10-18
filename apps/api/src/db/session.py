@@ -29,3 +29,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Dependency for work that outlives the request, such as background tasks.
+
+    The request's own session is closed once the response is sent, so
+    background work opens its own from this factory.
+    """
+    return async_session_factory

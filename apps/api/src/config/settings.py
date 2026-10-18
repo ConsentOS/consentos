@@ -224,6 +224,13 @@ class Settings(BaseSettings):
         return source.encode("utf-8")
 
 
+def configured_base_url(value: str | None) -> str | None:
+    """A configured base URL without its trailing slash, or None if unset."""
+    if value is None:
+        return None
+    return value.strip().rstrip("/") or None
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
