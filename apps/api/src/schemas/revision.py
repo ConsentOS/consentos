@@ -58,6 +58,17 @@ class ChangedSource(BaseModel):
     id: str
 
 
+class LastAttempt(BaseModel):
+    action: str
+    status: str
+    error_code: str | None
+    error_message: str | None
+    attempted_at: datetime
+    attempted_by_name: str | None
+    # The revision a successful attempt made live.
+    revision_number: int | None
+
+
 class DraftStatusResponse(BaseModel):
     live_revision: RevisionSummary | None
     content_hash: str
@@ -67,3 +78,4 @@ class DraftStatusResponse(BaseModel):
     # Changes to what visitors consented to: "categories", "purposes" or
     # "vendors". Non-empty means asking visitors again is recommended.
     reconsent_reasons: list[str]
+    last_attempt: LastAttempt | None

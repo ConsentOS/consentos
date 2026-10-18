@@ -436,12 +436,23 @@ export interface RevisionList {
 
 export type ReconsentReason = 'categories' | 'purposes' | 'vendors';
 
+export interface PublishAttempt {
+  action: 'publish' | 'rollback' | 'bulk_publish';
+  status: 'succeeded' | 'failed';
+  error_code: string | null;
+  error_message: string | null;
+  attempted_at: string;
+  attempted_by_name: string | null;
+  revision_number: number | null;
+}
+
 export interface DraftStatus {
   live_revision: RevisionSummary | null;
   content_hash: string;
   has_unpublished_changes: boolean;
   changed_sources: { kind: string; id: string }[];
   reconsent_reasons: ReconsentReason[];
+  last_attempt: PublishAttempt | null;
 }
 
 export interface RevisionDetail extends RevisionListItem {

@@ -1,6 +1,7 @@
 """Draft, publish and revision history endpoints for a site's config."""
 
 import uuid
+from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -19,10 +20,8 @@ from src.schemas.revision import (
     RollbackRequest,
 )
 from src.services.config_publishing import (
-    AlreadyLiveError,
-    DraftOutOfDateError,
     DraftStatus,
-    NothingToPublishError,
+    PublishError,
     RevisionEntry,
     RevisionNotFoundError,
     get_draft_status,
@@ -31,6 +30,7 @@ from src.services.config_publishing import (
     list_revisions,
     publish_draft,
     reconsent_reasons,
+    record_attempt,
     rollback_to_revision,
 )
 from src.services.config_snapshot import SiteNotFoundError
@@ -61,27 +61,20 @@ async def publish_config(
 ) -> SiteConfigRevision:
     """Publish the site's draft as a new live revision. Requires admin role."""
     await _require_org_site(site_id, current_user, db)
-    try:
-        return await publish_draft(
+    return await _attempt(
+        db,
+        site_id,
+        "publish",
+        current_user,
+        lambda: publish_draft(
             db,
             site_id,
             expected_content_hash=body.expected_content_hash,
             published_by=current_user.id,
             note=body.note,
             requires_reconsent=body.ask_visitors_again,
-        )
-    except SiteNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found") from exc
-    except DraftOutOfDateError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The draft has changed since you reviewed it. Review the changes again.",
-        ) from exc
-    except NothingToPublishError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="There are no unpublished changes",
-        ) from exc
+        ),
+    )
 
 
 @router.get("/sites/{site_id}/revisions", response_model=RevisionList)
@@ -138,24 +131,67 @@ async def rollback(
     The draft is left as it is.
     """
     await _require_org_site(site_id, current_user, db)
-    try:
-        return await rollback_to_revision(
+    return await _attempt(
+        db,
+        site_id,
+        "rollback",
+        current_user,
+        lambda: rollback_to_revision(
             db,
             site_id,
             revision_id,
             published_by=current_user.id,
             requires_reconsent=body.ask_visitors_again,
-        )
+        ),
+    )
+
+
+# Refusals map to 409 unless listed here.
+_ERROR_STATUS = {RevisionNotFoundError.code: status.HTTP_404_NOT_FOUND}
+
+
+async def _attempt(
+    db: AsyncSession,
+    site_id: uuid.UUID,
+    action: str,
+    current_user: CurrentUser,
+    operation: Callable[[], Awaitable[SiteConfigRevision]],
+) -> SiteConfigRevision:
+    """Run a publish or rollback and log the attempt, whatever the outcome.
+
+    A failure rolls back everything the operation did, so the live
+    revision and the draft are untouched, then logs the failure in its
+    own commit so it survives the error response.
+    """
+    try:
+        revision = await operation()
     except SiteNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found") from exc
-    except RevisionNotFoundError as exc:
+    except PublishError as exc:
+        await _record_failure(db, site_id, action, current_user, exc)
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found"
+            status_code=_ERROR_STATUS.get(exc.code, status.HTTP_409_CONFLICT),
+            detail=exc.message,
         ) from exc
-    except AlreadyLiveError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="That revision is already live"
-        ) from exc
+    except Exception:
+        await _record_failure(db, site_id, action, current_user, PublishError())
+        raise
+    await record_attempt(
+        db, site_id, action=action, attempted_by=current_user.id, revision=revision
+    )
+    return revision
+
+
+async def _record_failure(
+    db: AsyncSession,
+    site_id: uuid.UUID,
+    action: str,
+    current_user: CurrentUser,
+    error: PublishError,
+) -> None:
+    await db.rollback()
+    await record_attempt(db, site_id, action=action, attempted_by=current_user.id, error=error)
+    await db.commit()
 
 
 def _entry_dict(entry: RevisionEntry) -> dict:

@@ -206,6 +206,7 @@ describe('LiveRevisionCard', () => {
     has_unpublished_changes: true,
     changed_sources: [],
     reconsent_reasons: [],
+    last_attempt: null,
     ...overrides,
   });
 
@@ -225,6 +226,50 @@ describe('LiveRevisionCard', () => {
 
     expect(await screen.findByText('v1')).toBeInTheDocument();
     expect(screen.queryByText('Unpublished changes')).not.toBeInTheDocument();
+  });
+
+  it('shows why the last publish failed', async () => {
+    mockGetDraftStatus.mockResolvedValue(
+      draft({
+        live_revision: revision(),
+        last_attempt: {
+          action: 'publish',
+          status: 'failed',
+          error_code: 'stale_draft',
+          error_message: 'The draft has changed since you reviewed it.',
+          attempted_at: '2026-10-18T13:00:00Z',
+          attempted_by_name: 'Ada Lovelace',
+          revision_number: null,
+        },
+      }),
+    );
+    renderWithQuery(<LiveRevisionCard siteId="site-1" />);
+
+    expect(
+      await screen.findByText(/Last publish failed by Ada Lovelace.*The draft has changed/),
+    ).toBeInTheDocument();
+  });
+
+  it('notes a successful last attempt quietly', async () => {
+    mockGetDraftStatus.mockResolvedValue(
+      draft({
+        live_revision: revision({ number: 2 }),
+        has_unpublished_changes: false,
+        last_attempt: {
+          action: 'rollback',
+          status: 'succeeded',
+          error_code: null,
+          error_message: null,
+          attempted_at: '2026-10-18T13:00:00Z',
+          attempted_by_name: null,
+          revision_number: 2,
+        },
+      }),
+    );
+    renderWithQuery(<LiveRevisionCard siteId="site-1" />);
+
+    expect(await screen.findByText(/Last rollback succeeded,/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('shows when the site is not yet published', async () => {

@@ -6,7 +6,8 @@ Create Date: 2026-10-18
 
 Immutable published snapshots of each site's config. A trigger rejects
 changes to a revision's recorded content. ``sites.live_revision_id``
-points at the revision the banner serves.
+points at the revision the banner serves, and ``publish_attempts``
+records every publish and rollback, including failures.
 
 Every existing site with a config gets v1, built from its current
 effective config, so it keeps serving exactly what it served before.
@@ -116,10 +117,56 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
+    op.create_table(
+        "publish_attempts",
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "site_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("sites.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("action", sa.String(20), nullable=False),
+        sa.Column("status", sa.String(20), nullable=False),
+        sa.Column(
+            "revision_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("site_config_revisions.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column("error_code", sa.String(50), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("batch_id", postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column(
+            "attempted_by",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+        sa.Column(
+            "attempted_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.CheckConstraint(
+            "action IN ('publish', 'rollback', 'bulk_publish')",
+            name="ck_publish_attempts_action",
+        ),
+        sa.CheckConstraint(
+            "status IN ('succeeded', 'failed')",
+            name="ck_publish_attempts_status",
+        ),
+    )
+    op.create_index(
+        "ix_publish_attempts_site_attempted", "publish_attempts", ["site_id", "attempted_at"]
+    )
     backfill_initial_revisions(op.get_bind())
 
 
 def downgrade() -> None:
+    op.drop_index("ix_publish_attempts_site_attempted", table_name="publish_attempts")
+    op.drop_table("publish_attempts")
     op.drop_constraint("fk_sites_live_revision_id", "sites", type_="foreignkey")
     op.drop_column("sites", "live_revision_id")
     op.execute(

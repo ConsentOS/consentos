@@ -1,6 +1,7 @@
 """Integration tests for the draft, publish and live revision lifecycle."""
 
 import uuid
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -372,6 +373,68 @@ class TestRollback:
         first = await _publish_draft(db_client, auth_headers, site_id)
         resp = await _rollback(db_client, other_org_headers, site_id, first["id"])
         assert resp.status_code == 404
+
+
+@requires_db
+class TestPublishAttempts:
+    async def test_success_is_recorded(self, db_client, auth_headers, test_user):
+        site_id = await create_test_site(db_client, auth_headers)
+        assert (await _draft(db_client, auth_headers, site_id))["last_attempt"] is None
+
+        await _publish_draft(db_client, auth_headers, site_id)
+
+        attempt = (await _draft(db_client, auth_headers, site_id))["last_attempt"]
+        assert attempt["action"] == "publish"
+        assert attempt["status"] == "succeeded"
+        assert attempt["revision_number"] == 1
+        assert attempt["attempted_by_name"] == test_user.full_name
+        assert attempt["error_message"] is None
+
+    async def test_refusal_is_recorded_and_changes_nothing(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/t")
+
+        resp = await _publish(db_client, auth_headers, site_id, "0" * 64)
+
+        assert resp.status_code == 409
+        draft = await _draft(db_client, auth_headers, site_id)
+        assert draft["live_revision"]["id"] == first["id"]
+        assert draft["has_unpublished_changes"] is True
+        attempt = draft["last_attempt"]
+        assert (attempt["status"], attempt["error_code"]) == ("failed", "stale_draft")
+        assert attempt["error_message"] == resp.json()["detail"]
+        assert attempt["revision_number"] is None
+
+    async def test_rollback_refusal_is_recorded(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+
+        await _rollback(db_client, auth_headers, site_id, first["id"])
+
+        attempt = (await _draft(db_client, auth_headers, site_id))["last_attempt"]
+        assert (attempt["action"], attempt["error_code"]) == ("rollback", "already_live")
+
+    async def test_unexpected_error_is_recorded(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/t")
+        draft = await _draft(db_client, auth_headers, site_id)
+
+        with (
+            patch(
+                "src.services.config_publishing._next_revision_number",
+                side_effect=RuntimeError("database went away"),
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            await _publish(db_client, auth_headers, site_id, draft["content_hash"])
+
+        after = await _draft(db_client, auth_headers, site_id)
+        assert after["live_revision"]["id"] == first["id"]
+        attempt = after["last_attempt"]
+        assert (attempt["status"], attempt["error_code"]) == ("failed", "publish_failed")
+        assert attempt["error_message"] == "The publish failed. Nothing was changed."
 
 
 @requires_db
