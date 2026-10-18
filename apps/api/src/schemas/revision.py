@@ -13,6 +13,12 @@ class PublishRequest(BaseModel):
     ask_visitors_again: bool = False
 
 
+class RollbackRequest(BaseModel):
+    # Gives the new revision a new consent version, so returning visitors
+    # are asked to consent again.
+    ask_visitors_again: bool = False
+
+
 class RevisionSummary(BaseModel):
     id: uuid.UUID
     number: int
@@ -41,6 +47,10 @@ class RevisionList(BaseModel):
 class RevisionDetail(RevisionListItem):
     snapshot: dict
     sources: list[dict]
+    # What rolling back to this revision would change that visitors
+    # consented to, compared with the live revision. Non-empty means
+    # asking visitors again is recommended.
+    rollback_reconsent_reasons: list[str]
 
 
 class ChangedSource(BaseModel):

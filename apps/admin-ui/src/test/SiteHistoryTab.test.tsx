@@ -4,15 +4,38 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import LiveRevisionCard from '../components/LiveRevisionCard';
 import SiteHistoryTab from '../components/SiteHistoryTab';
-import type { DraftStatus, RevisionList, RevisionListItem } from '../types/api';
+import { useAuthStore } from '../stores/auth';
+import type {
+  DraftStatus,
+  RevisionDetail,
+  RevisionList,
+  RevisionListItem,
+  RevisionSummary,
+} from '../types/api';
 
 const mockListRevisions = vi.fn<(siteId: string, params: unknown) => Promise<RevisionList>>();
 const mockGetDraftStatus = vi.fn<(siteId: string) => Promise<DraftStatus>>();
+const mockGetRevision = vi.fn<(siteId: string, revisionId: string) => Promise<RevisionDetail>>();
+const mockRollback =
+  vi.fn<(siteId: string, revisionId: string, askAgain: boolean) => Promise<RevisionSummary>>();
 
-vi.mock('../api/revisions', () => ({
-  listRevisions: (siteId: string, params: unknown) => mockListRevisions(siteId, params),
-  getDraftStatus: (siteId: string) => mockGetDraftStatus(siteId),
-}));
+vi.mock('../api/revisions', async () => {
+  const actual = await vi.importActual<typeof import('../api/revisions')>('../api/revisions');
+  return {
+    apiErrorMessage: actual.apiErrorMessage,
+    listRevisions: (siteId: string, params: unknown) => mockListRevisions(siteId, params),
+    getDraftStatus: (siteId: string) => mockGetDraftStatus(siteId),
+    getRevision: (siteId: string, revisionId: string) => mockGetRevision(siteId, revisionId),
+    rollbackToRevision: (siteId: string, revisionId: string, askAgain: boolean) =>
+      mockRollback(siteId, revisionId, askAgain),
+  };
+});
+
+vi.mock('../stores/auth', () => ({ useAuthStore: vi.fn() }));
+
+function signInAs(role: 'owner' | 'admin' | 'editor' | 'viewer') {
+  vi.mocked(useAuthStore).mockReturnValue({ user: { role } } as ReturnType<typeof useAuthStore>);
+}
 
 function revision(overrides: Partial<RevisionListItem> = {}): RevisionListItem {
   return {
@@ -40,6 +63,7 @@ function renderWithQuery(ui: React.ReactElement) {
 describe('SiteHistoryTab', () => {
   beforeEach(() => {
     mockListRevisions.mockReset();
+    signInAs('owner');
   });
 
   it('lists revisions with the live one marked', async () => {
@@ -100,6 +124,78 @@ describe('SiteHistoryTab', () => {
     mockListRevisions.mockRejectedValue(new Error('boom'));
     renderWithQuery(<SiteHistoryTab siteId="site-1" />);
     expect(await screen.findByText("Couldn't load the publish history.")).toBeInTheDocument();
+  });
+});
+
+describe('Rolling back', () => {
+  const live = revision({ id: 'rev-2', number: 2, is_live: true });
+  const earlier = revision({ id: 'rev-1', number: 1 });
+
+  function detail(reasons: RevisionDetail['rollback_reconsent_reasons']): RevisionDetail {
+    return { ...earlier, snapshot: {}, sources: [], rollback_reconsent_reasons: reasons };
+  }
+
+  beforeEach(() => {
+    mockListRevisions.mockReset().mockResolvedValue({ total: 2, items: [live, earlier] });
+    mockGetRevision.mockReset();
+    mockRollback.mockReset();
+    signInAs('admin');
+  });
+
+  it('offers rollback only on earlier revisions', async () => {
+    renderWithQuery(<SiteHistoryTab siteId="site-1" />);
+    expect(await screen.findAllByRole('button', { name: 'Roll back' })).toHaveLength(1);
+  });
+
+  it('is disabled for editors with an explanation', async () => {
+    signInAs('editor');
+    renderWithQuery(<SiteHistoryTab siteId="site-1" />);
+    const button = await screen.findByRole('button', { name: 'Roll back' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', 'Only owners and admins can roll back');
+  });
+
+  it('pre-ticks asking again when consent scope changes', async () => {
+    mockGetRevision.mockResolvedValue(detail(['categories', 'vendors']));
+    mockRollback.mockResolvedValue({ ...earlier, id: 'rev-3', number: 3 });
+    renderWithQuery(<SiteHistoryTab siteId="site-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Roll back' }));
+
+    const checkbox = await screen.findByRole('checkbox', { name: /Ask visitors to consent again/ });
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(screen.getByText(/cookie categories and disclosed vendors/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Roll back to v1' }));
+    await waitFor(() => expect(mockRollback).toHaveBeenCalledWith('site-1', 'rev-1', true));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('leaves the option unticked otherwise', async () => {
+    mockGetRevision.mockResolvedValue(detail([]));
+    mockRollback.mockResolvedValue({ ...earlier, id: 'rev-3', number: 3 });
+    renderWithQuery(<SiteHistoryTab siteId="site-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Roll back' }));
+    const confirm = await screen.findByRole('button', { name: 'Roll back to v1' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mockRollback).toHaveBeenCalledWith('site-1', 'rev-1', false));
+  });
+
+  it('shows why a rollback failed', async () => {
+    mockGetRevision.mockResolvedValue(detail([]));
+    mockRollback.mockRejectedValue({ response: { data: { detail: 'That revision is already live' } } });
+    renderWithQuery(<SiteHistoryTab siteId="site-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Roll back' }));
+    const confirm = await screen.findByRole('button', { name: 'Roll back to v1' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+
+    expect(await screen.findByText('That revision is already live')).toBeInTheDocument();
   });
 });
 

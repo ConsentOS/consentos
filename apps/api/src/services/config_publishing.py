@@ -39,6 +39,14 @@ class NothingToPublishError(Exception):
     """The draft is identical to the live revision."""
 
 
+class RevisionNotFoundError(LookupError):
+    """The revision doesn't exist or belongs to another site."""
+
+
+class AlreadyLiveError(Exception):
+    """The revision to roll back to is already live."""
+
+
 @dataclass(frozen=True)
 class DraftStatus:
     live_revision: SiteConfigRevision | None
@@ -196,15 +204,76 @@ async def publish_draft(
     If the draft has changed since, the publish is refused so nobody
     publishes changes they haven't seen.
 
-    The new revision keeps the live revision's consent version, so
-    returning visitors aren't asked again, unless ``requires_reconsent``
-    is set, which gives it a new one.
-
     Raises:
         SiteNotFoundError: the site doesn't exist or isn't active.
         DraftOutOfDateError: the draft no longer matches what was reviewed.
         NothingToPublishError: the draft matches the live revision.
     """
+    site = await _lock_site(db, site_id)
+    built = await build_site_snapshot(db, site_id)
+    if built.content_hash != expected_content_hash:
+        raise DraftOutOfDateError(built.content_hash)
+
+    live = await _live_for_update(db, site)
+    if live is not None and live.content_hash == built.content_hash:
+        raise NothingToPublishError(str(site_id))
+
+    return await _make_live(
+        db,
+        site,
+        live,
+        snapshot=built.snapshot,
+        site_layer=built.site_layer,
+        sources=built.sources,
+        content_hash=built.content_hash,
+        note=note,
+        published_by=published_by,
+        requires_reconsent=requires_reconsent,
+    )
+
+
+async def rollback_to_revision(
+    db: AsyncSession,
+    site_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    *,
+    published_by: uuid.UUID | None,
+    requires_reconsent: bool = False,
+) -> SiteConfigRevision:
+    """Make an earlier revision live again by copying it into a new one.
+
+    History only ever grows: the copy gets the next number and points
+    back at its source. The draft is not touched, so any unpublished
+    changes are kept and compared against the new live revision.
+
+    Raises:
+        SiteNotFoundError: the site doesn't exist or isn't active.
+        RevisionNotFoundError: the revision isn't one of this site's.
+        AlreadyLiveError: the revision is already live.
+    """
+    site = await _lock_site(db, site_id)
+    source = await db.get(SiteConfigRevision, revision_id)
+    if source is None or source.site_id != site_id:
+        raise RevisionNotFoundError(str(revision_id))
+    if source.id == site.live_revision_id:
+        raise AlreadyLiveError(str(revision_id))
+
+    return await _make_live(
+        db,
+        site,
+        await _live_for_update(db, site),
+        snapshot=source.snapshot,
+        site_layer=source.site_layer,
+        sources=source.sources,
+        content_hash=source.content_hash,
+        note=f"Rollback to v{source.number}",
+        published_by=published_by,
+        requires_reconsent=requires_reconsent,
+        rolled_back_from_id=source.id,
+    )
+
+
+async def _lock_site(db: AsyncSession, site_id: uuid.UUID) -> Site:
     # Locking the site row serialises publishes per site, so two at once
     # can't both read the same previous revision and take one number.
     site = (
@@ -220,27 +289,45 @@ async def publish_draft(
     ).scalar_one_or_none()
     if site is None:
         raise SiteNotFoundError(str(site_id))
+    return site
 
-    built = await build_site_snapshot(db, site_id)
-    if built.content_hash != expected_content_hash:
-        raise DraftOutOfDateError(built.content_hash)
 
-    live = (
-        await db.get(SiteConfigRevision, site.live_revision_id) if site.live_revision_id else None
-    )
-    if live is not None and live.content_hash == built.content_hash:
-        raise NothingToPublishError(str(site_id))
+async def _live_for_update(db: AsyncSession, site: Site) -> SiteConfigRevision | None:
+    if site.live_revision_id is None:
+        return None
+    return await db.get(SiteConfigRevision, site.live_revision_id)
 
+
+async def _make_live(
+    db: AsyncSession,
+    site: Site,
+    live: SiteConfigRevision | None,
+    *,
+    snapshot: dict[str, Any],
+    site_layer: dict[str, Any],
+    sources: list[dict[str, Any]],
+    content_hash: str,
+    note: str | None,
+    published_by: uuid.UUID | None,
+    requires_reconsent: bool,
+    rolled_back_from_id: uuid.UUID | None = None,
+) -> SiteConfigRevision:
+    """Add a revision with the next number and point the site at it.
+
+    It keeps the live revision's consent version, so returning visitors
+    aren't asked again, unless ``requires_reconsent`` gives it a new one.
+    """
     revision = SiteConfigRevision(
-        site_id=site_id,
-        number=await _next_revision_number(db, site_id),
+        site_id=site.id,
+        number=await _next_revision_number(db, site.id),
         consent_version=(live.consent_version if live and not requires_reconsent else uuid.uuid4()),
         requires_reconsent=requires_reconsent,
-        snapshot=built.snapshot,
-        site_layer=built.site_layer,
-        sources=built.sources,
-        content_hash=built.content_hash,
+        snapshot=snapshot,
+        site_layer=site_layer,
+        sources=sources,
+        content_hash=content_hash,
         note=note,
+        rolled_back_from_id=rolled_back_from_id,
         published_by=published_by,
     )
     db.add(revision)

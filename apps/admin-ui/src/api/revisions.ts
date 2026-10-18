@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { DraftStatus, RevisionList } from '../types/api';
+import type { DraftStatus, RevisionDetail, RevisionList, RevisionSummary } from '../types/api';
 
 export async function getDraftStatus(siteId: string): Promise<DraftStatus> {
   const { data } = await apiClient.get<DraftStatus>(`/config/sites/${siteId}/draft`);
@@ -14,4 +14,29 @@ export async function listRevisions(
     params,
   });
   return data;
+}
+
+export async function getRevision(siteId: string, revisionId: string): Promise<RevisionDetail> {
+  const { data } = await apiClient.get<RevisionDetail>(
+    `/config/sites/${siteId}/revisions/${revisionId}`,
+  );
+  return data;
+}
+
+export async function rollbackToRevision(
+  siteId: string,
+  revisionId: string,
+  askVisitorsAgain: boolean,
+): Promise<RevisionSummary> {
+  const { data } = await apiClient.post<RevisionSummary>(
+    `/config/sites/${siteId}/revisions/${revisionId}/rollback`,
+    { ask_visitors_again: askVisitorsAgain },
+  );
+  return data;
+}
+
+/** The API's own explanation of a failed request, or ``fallback``. */
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === 'string' ? detail : fallback;
 }

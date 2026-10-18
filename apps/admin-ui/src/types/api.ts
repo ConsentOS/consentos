@@ -443,3 +443,9 @@ export interface DraftStatus {
   changed_sources: { kind: string; id: string }[];
   reconsent_reasons: ReconsentReason[];
 }
+
+export interface RevisionDetail extends RevisionListItem {
+  snapshot: Record<string, unknown>;
+  sources: { kind: string; id: string; content_hash: string }[];
+  rollback_reconsent_reasons: ReconsentReason[];
+}

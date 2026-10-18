@@ -16,16 +16,22 @@ from src.schemas.revision import (
     RevisionDetail,
     RevisionList,
     RevisionSummary,
+    RollbackRequest,
 )
 from src.services.config_publishing import (
+    AlreadyLiveError,
     DraftOutOfDateError,
     DraftStatus,
     NothingToPublishError,
     RevisionEntry,
+    RevisionNotFoundError,
     get_draft_status,
+    get_live_revision,
     get_revision,
     list_revisions,
     publish_draft,
+    reconsent_reasons,
+    rollback_to_revision,
 )
 from src.services.config_snapshot import SiteNotFoundError
 from src.services.dependencies import require_role
@@ -108,11 +114,48 @@ async def get_revision_detail(
     entry = await get_revision(db, site_id, revision_id)
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    live = await get_live_revision(db, site_id)
     return {
         **_entry_dict(entry),
         "snapshot": entry.revision.snapshot,
         "sources": entry.revision.sources,
+        "rollback_reconsent_reasons": (
+            reconsent_reasons(live.snapshot, entry.revision.snapshot) if live else []
+        ),
     }
+
+
+@router.post("/sites/{site_id}/revisions/{revision_id}/rollback", response_model=RevisionSummary)
+async def rollback(
+    site_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    body: RollbackRequest,
+    current_user: CurrentUser = Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+) -> SiteConfigRevision:
+    """Make an earlier revision live again as a new revision. Requires admin role.
+
+    The draft is left as it is.
+    """
+    await _require_org_site(site_id, current_user, db)
+    try:
+        return await rollback_to_revision(
+            db,
+            site_id,
+            revision_id,
+            published_by=current_user.id,
+            requires_reconsent=body.ask_visitors_again,
+        )
+    except SiteNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found") from exc
+    except RevisionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found"
+        ) from exc
+    except AlreadyLiveError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="That revision is already live"
+        ) from exc
 
 
 def _entry_dict(entry: RevisionEntry) -> dict:

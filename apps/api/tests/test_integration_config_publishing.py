@@ -251,6 +251,129 @@ class TestHistory:
         assert resp.status_code == 405
 
 
+async def _rollback(client, headers, site_id, revision_id, ask_again=False):
+    return await client.post(
+        f"/api/v1/config/sites/{site_id}/revisions/{revision_id}/rollback",
+        headers=headers,
+        json={"ask_visitors_again": ask_again},
+    )
+
+
+async def _translate(client, headers, site_id, locale, strings):
+    base = f"/api/v1/sites/{site_id}/translations"
+    resp = await client.put(f"{base}/{locale}", headers=headers, json={"strings": strings})
+    if resp.status_code == 404:
+        resp = await client.post(
+            f"{base}/", headers=headers, json={"locale": locale, "strings": strings}
+        )
+    assert resp.status_code in (200, 201), resp.text
+
+
+@requires_db
+class TestRollback:
+    async def test_restores_what_the_revision_served(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _translate(db_client, auth_headers, site_id, "fr", {"title": "Avant"})
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        served_first = (
+            await db_client.get(f"/api/v1/config/sites/{site_id}/geo-resolved?locale=fr")
+        ).json()
+
+        await _edit(db_client, auth_headers, site_id, privacy_policy_url="https://x.test/v2")
+        await _translate(db_client, auth_headers, site_id, "fr", {"title": "Après"})
+        await _publish_draft(db_client, auth_headers, site_id)
+
+        resp = await _rollback(db_client, auth_headers, site_id, first["id"])
+
+        assert resp.status_code == 200, resp.text
+        restored = resp.json()
+        assert restored["number"] == 3
+        assert restored["note"] == "Rollback to v1"
+        served_now = (
+            await db_client.get(f"/api/v1/config/sites/{site_id}/geo-resolved?locale=fr")
+        ).json()
+        assert served_now == served_first
+
+        history = (
+            await db_client.get(f"/api/v1/config/sites/{site_id}/revisions", headers=auth_headers)
+        ).json()["items"]
+        assert history[0]["is_live"] is True
+        assert history[0]["rolled_back_from_id"] == first["id"]
+        assert history[0]["rolled_back_from_number"] == 1
+
+    async def test_leaves_the_draft_alone(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/v2")
+        await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/unpublished")
+
+        await _rollback(db_client, auth_headers, site_id, first["id"])
+
+        config = (
+            await db_client.get(f"/api/v1/sites/{site_id}/config", headers=auth_headers)
+        ).json()
+        assert config["terms_url"] == "https://x.test/unpublished"
+        draft = await _draft(db_client, auth_headers, site_id)
+        assert draft["has_unpublished_changes"] is True
+        assert draft["live_revision"]["number"] == 3
+
+    async def test_keeps_or_changes_the_consent_version(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/v2")
+        second = await _publish_draft(db_client, auth_headers, site_id)
+
+        kept = (await _rollback(db_client, auth_headers, site_id, first["id"])).json()
+        asked = (
+            await _rollback(db_client, auth_headers, site_id, second["id"], ask_again=True)
+        ).json()
+
+        assert kept["consent_version"] == first["consent_version"]
+        assert asked["consent_version"] != first["consent_version"]
+        assert asked["requires_reconsent"] is True
+
+    async def test_suggests_asking_again_when_categories_differ(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, enabled_categories=["necessary"])
+        second = await _publish_draft(db_client, auth_headers, site_id)
+
+        detail = (
+            await db_client.get(
+                f"/api/v1/config/sites/{site_id}/revisions/{first['id']}", headers=auth_headers
+            )
+        ).json()
+        live_detail = (
+            await db_client.get(
+                f"/api/v1/config/sites/{site_id}/revisions/{second['id']}", headers=auth_headers
+            )
+        ).json()
+        assert detail["rollback_reconsent_reasons"] == ["categories"]
+        assert live_detail["rollback_reconsent_reasons"] == []
+
+    async def test_live_revision_is_refused(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        resp = await _rollback(db_client, auth_headers, site_id, first["id"])
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "That revision is already live"
+
+    async def test_another_sites_revision_is_not_found(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _publish_draft(db_client, auth_headers, site_id)
+        other_site = await create_test_site(db_client, auth_headers)
+        other = await _publish_draft(db_client, auth_headers, other_site)
+        resp = await _rollback(db_client, auth_headers, site_id, other["id"])
+        assert resp.status_code == 404
+
+    async def test_other_org_cannot_roll_back(self, db_client, auth_headers, other_org_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        resp = await _rollback(db_client, other_org_headers, site_id, first["id"])
+        assert resp.status_code == 404
+
+
 @requires_db
 class TestOrgScoping:
     async def test_other_org_cannot_see_or_publish(

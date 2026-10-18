@@ -2,12 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { listRevisions } from '../api/revisions';
+import { useAuthStore } from '../stores/auth';
+import RollbackDialog from './RollbackDialog';
 import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { EmptyState } from './ui/empty-state';
 import { LoadingState } from './ui/loading-state';
+import type { RevisionListItem } from '../types/api';
 
 const PAGE_SIZE = 25;
 
@@ -17,6 +20,9 @@ interface Props {
 
 export default function SiteHistoryTab({ siteId }: Props) {
   const [page, setPage] = useState(0);
+  const [rollingBack, setRollingBack] = useState<RevisionListItem | null>(null);
+  const { user } = useAuthStore();
+  const canRollback = user?.role === 'owner' || user?.role === 'admin';
   const { data, isLoading, isError } = useQuery({
     queryKey: ['sites', siteId, 'revisions', page],
     queryFn: () => listRevisions(siteId, { limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
@@ -39,7 +45,8 @@ export default function SiteHistoryTab({ siteId }: Props) {
             <th className="py-2 pr-4 font-medium">Version</th>
             <th className="py-2 pr-4 font-medium">Published</th>
             <th className="py-2 pr-4 font-medium">By</th>
-            <th className="py-2 font-medium">Note</th>
+            <th className="py-2 pr-4 font-medium">Note</th>
+            <th className="py-2" />
           </tr>
         </thead>
         <tbody>
@@ -60,11 +67,24 @@ export default function SiteHistoryTab({ siteId }: Props) {
               <td className="py-3 pr-4 text-text-secondary">
                 {revision.published_by_name ?? (revision.published_by ? 'Deleted user' : 'System')}
               </td>
-              <td className="py-3 text-text-secondary">
+              <td className="py-3 pr-4 text-text-secondary">
                 {revision.rolled_back_from_number !== null && (
                   <span className="mr-1">Copy of v{revision.rolled_back_from_number}.</span>
                 )}
                 {revision.note ?? (revision.rolled_back_from_number === null ? '—' : null)}
+              </td>
+              <td className="py-3 text-right">
+                {!revision.is_live && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!canRollback}
+                    title={canRollback ? undefined : 'Only owners and admins can roll back'}
+                    onClick={() => setRollingBack(revision)}
+                  >
+                    Roll back
+                  </Button>
+                )}
               </td>
             </tr>
           ))}
@@ -89,6 +109,13 @@ export default function SiteHistoryTab({ siteId }: Props) {
             </Button>
           </div>
         </div>
+      )}
+      {rollingBack && (
+        <RollbackDialog
+          siteId={siteId}
+          revision={rollingBack}
+          onClose={() => setRollingBack(null)}
+        />
       )}
     </Card>
   );

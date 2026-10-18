@@ -194,6 +194,20 @@ class TestPublishConfig:
         assert resp.status_code == 403
 
 
+class TestRollbackPermissions:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("role", ["editor", "viewer"])
+    async def test_requires_admin(self, mock_app, role):
+        db = _mock_db_sequence()
+        async with await _client(mock_app, db) as client:
+            resp = await client.post(
+                f"/api/v1/config/sites/{uuid.uuid4()}/revisions/{uuid.uuid4()}/rollback",
+                headers=_auth_headers(role=role),
+                json={},
+            )
+        assert resp.status_code == 403
+
+
 class TestGeoResolvedConfig:
     @pytest.mark.asyncio
     async def test_get_geo_resolved_config_with_header(self, mock_app):
