@@ -303,6 +303,9 @@ class TestRollback:
         served_now = (
             await db_client.get(f"/api/v1/config/sites/{site_id}/geo-resolved?locale=fr")
         ).json()
+        # Everything matches except which revision served it.
+        assert served_now.pop("revision_id") == restored["id"]
+        served_first.pop("revision_id")
         assert served_now == served_first
 
         history = (

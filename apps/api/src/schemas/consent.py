@@ -28,6 +28,9 @@ class ConsentRecordCreate(BaseModel):
     page_url: str | None = None
     country_code: str | None = Field(default=None, max_length=5)
     region_code: str | None = Field(default=None, max_length=10)
+    # The ``revision_id`` of the config the visitor saw. Its consent
+    # version is recorded from the revision itself.
+    config_revision_id: uuid.UUID | None = None
 
 
 class ConsentRecordResponse(BaseModel):
@@ -45,6 +48,10 @@ class ConsentRecordResponse(BaseModel):
     page_url: str | None = None
     country_code: str | None = None
     region_code: str | None = None
+    config_revision_id: uuid.UUID | None = None
+    consent_version: uuid.UUID | None = None
+    # The revision's version number, for display.
+    config_revision_number: int | None = None
     consented_at: datetime
 
     model_config = {"from_attributes": True}

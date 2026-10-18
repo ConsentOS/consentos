@@ -32,6 +32,8 @@ def _mock_consent_record(**overrides):
     record.page_url = overrides.get("page_url")
     record.country_code = overrides.get("country_code")
     record.region_code = overrides.get("region_code")
+    record.config_revision_id = overrides.get("config_revision_id")
+    record.consent_version = overrides.get("consent_version")
     record.consented_at = overrides.get("consented_at", datetime.now(UTC))
     return record
 

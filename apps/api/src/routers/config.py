@@ -142,6 +142,8 @@ async def get_geo_resolved_config(
     )
     public["detected_country"] = geo.country_code
     public["detected_region"] = geo.region
+    # Sent back with each consent so the record shows what was served.
+    public["revision_id"] = str(revision.id)
     return public
 
 

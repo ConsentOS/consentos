@@ -693,6 +693,9 @@ function handleConsent(
       gpc_honoured: gpcResult?.honoured ?? false,
       gpp_string: gppString ?? null,
       page_url: window.location.href,
+      // The published revision the visitor consented against; empty
+      // while the site isn't published yet.
+      config_revision_id: config.revision_id ?? null,
     }),
   }).catch((err) => console.warn('[ConsentOS] Failed to record consent:', err));
 

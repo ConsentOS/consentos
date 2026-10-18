@@ -2,7 +2,7 @@
 
 import uuid
 
-from tests.conftest import create_test_site, requires_db
+from tests.conftest import create_test_site, publish_site, requires_db
 
 
 @requires_db
@@ -240,3 +240,64 @@ async def _create_site_with_domains(client, headers) -> tuple[str, str]:
     )
     assert resp.status_code == 200, resp.text
     return site_id, domain
+
+
+async def _consent(client, site_id, **extra):
+    return await client.post(
+        "/api/v1/consent/",
+        json={
+            "site_id": site_id,
+            "visitor_id": str(uuid.uuid4()),
+            "action": "accept_all",
+            "categories_accepted": ["necessary"],
+            **extra,
+        },
+    )
+
+
+@requires_db
+class TestConsentRevision:
+    async def test_records_the_revision_the_visitor_saw(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        revision = await publish_site(db_client, auth_headers, site_id)
+        served = (await db_client.get(f"/api/v1/config/sites/{site_id}/geo-resolved")).json()
+        assert served["revision_id"] == revision["id"]
+
+        resp = await _consent(db_client, site_id, config_revision_id=served["revision_id"])
+
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["config_revision_id"] == revision["id"]
+        assert body["consent_version"] == served["id"]
+        assert body["config_revision_number"] == 1
+
+        listed = (
+            await db_client.get(
+                "/api/v1/consent/", params={"site_id": site_id}, headers=auth_headers
+            )
+        ).json()["items"]
+        assert (listed[0]["config_revision_id"], listed[0]["config_revision_number"]) == (
+            revision["id"],
+            1,
+        )
+        fetched = (
+            await db_client.get(f"/api/v1/consent/{body['id']}", headers=auth_headers)
+        ).json()
+        assert fetched["config_revision_number"] == 1
+
+    async def test_without_a_revision(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        body = (await _consent(db_client, site_id)).json()
+        assert body["config_revision_id"] is None
+        assert body["consent_version"] is None
+        assert body["config_revision_number"] is None
+
+    async def test_another_sites_revision_is_not_recorded(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        other_site = await create_test_site(db_client, auth_headers)
+        other = await publish_site(db_client, auth_headers, other_site)
+
+        body = (await _consent(db_client, site_id, config_revision_id=other["id"])).json()
+
+        assert body["config_revision_id"] is None
+        assert body["consent_version"] is None
