@@ -6,19 +6,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
 from src.extensions.registry import get_registry
-from src.models.cookie import Cookie, CookieAllowListEntry, CookieCategory
-from src.models.iab_gvl import IabGvlMeta
-from src.models.org_config import OrgConfig
+from src.models.cookie import Cookie, CookieCategory
 from src.models.site import Site
 from src.models.site_config import SiteConfig
-from src.models.site_group import SiteGroup
-from src.models.site_group_config import SiteGroupConfig
 from src.models.translation import Translation
 from src.schemas.auth import CurrentUser
 from src.schemas.cookie import ReviewStatus
 from src.schemas.site import SiteConfigResponse
+from src.services.config_layers import (
+    get_site_group_id,
+    get_site_org_id,
+    load_category_tcf_purposes,
+    load_cookie_count,
+    load_group_defaults,
+    load_gvl_version,
+    load_org_defaults,
+)
 from src.services.config_resolver import (
     CONFIG_FIELDS,
+    apply_consent_group,
     build_public_config,
     orm_to_config_dict,
     resolve_config,
@@ -59,10 +65,10 @@ async def get_public_site_config(
             detail="Site configuration not found",
         )
 
-    org_id = await _get_site_org_id(site_id, db)
-    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
-    group_id = await _get_site_group_id(site_id, db)
-    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    org_id = await get_site_org_id(site_id, db)
+    org_defaults = await load_org_defaults(org_id, db) if org_id else None
+    group_id = await get_site_group_id(site_id, db)
+    group_defaults = await load_group_defaults(group_id, db) if group_id else None
     resolved = resolve_config(
         orm_to_config_dict(config),
         org_defaults=org_defaults,
@@ -127,12 +133,12 @@ async def get_resolved_config(
     config_dict = orm_to_config_dict(config, include_id=True)
 
     # Load org defaults via the site
-    org_id = await _get_site_org_id(site_id, db)
-    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
+    org_id = await get_site_org_id(site_id, db)
+    org_defaults = await load_org_defaults(org_id, db) if org_id else None
 
     # Load site group defaults
-    group_id = await _get_site_group_id(site_id, db)
-    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    group_id = await get_site_group_id(site_id, db)
+    group_defaults = await load_group_defaults(group_id, db) if group_id else None
 
     resolved = resolve_config(
         config_dict,
@@ -141,17 +147,11 @@ async def get_resolved_config(
         region=region,
     )
 
-    # Set consent_group_id when cross-domain sharing is enabled on the
-    # group. The banner uses this as the signal to activate the iframe
-    # bridge.
-    if group_id and resolved.get("consent_sharing_enabled"):
-        resolved["consent_group_id"] = str(group_id)
-        if resolved.get("consent_bridge_url"):
-            resolved["consent_bridge_url"] = resolved["consent_bridge_url"]
+    apply_consent_group(resolved, group_id)
 
-    gvl_version = await _load_gvl_version(db)
-    category_tcf_purposes = await _load_category_tcf_purposes(db)
-    cookie_count = await _load_cookie_count(db, site_id)
+    gvl_version = await load_gvl_version(db)
+    category_tcf_purposes = await load_category_tcf_purposes(db)
+    cookie_count = await load_cookie_count(db, site_id)
     return build_public_config(
         str(site_id),
         resolved,
@@ -198,10 +198,10 @@ async def get_geo_resolved_config(
     geo = await detect_region(request)
 
     config_dict = orm_to_config_dict(config, include_id=True)
-    org_id = await _get_site_org_id(site_id, db)
-    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
-    group_id = await _get_site_group_id(site_id, db)
-    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    org_id = await get_site_org_id(site_id, db)
+    org_defaults = await load_org_defaults(org_id, db) if org_id else None
+    group_id = await get_site_group_id(site_id, db)
+    group_defaults = await load_group_defaults(group_id, db) if group_id else None
 
     resolved = resolve_config(
         config_dict,
@@ -209,9 +209,10 @@ async def get_geo_resolved_config(
         group_defaults=group_defaults,
         region=geo.region,
     )
-    gvl_version = await _load_gvl_version(db)
-    category_tcf_purposes = await _load_category_tcf_purposes(db)
-    cookie_count = await _load_cookie_count(db, site_id)
+    apply_consent_group(resolved, group_id)
+    gvl_version = await load_gvl_version(db)
+    category_tcf_purposes = await load_category_tcf_purposes(db)
+    cookie_count = await load_cookie_count(db, site_id)
     public = build_public_config(
         str(site_id),
         resolved,
@@ -293,10 +294,10 @@ async def get_public_cookies(
     config_result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
     config = config_result.scalar_one_or_none()
 
-    org_id = await _get_site_org_id(site_id, db)
-    org_defaults = await _load_org_defaults(org_id, db) if org_id else None
-    group_id = await _get_site_group_id(site_id, db)
-    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    org_id = await get_site_org_id(site_id, db)
+    org_defaults = await load_org_defaults(org_id, db) if org_id else None
+    group_id = await get_site_group_id(site_id, db)
+    group_defaults = await load_group_defaults(group_id, db) if group_id else None
     resolved = resolve_config(
         orm_to_config_dict(config) if config else {},
         org_defaults=org_defaults,
@@ -411,9 +412,9 @@ async def get_config_inheritance(
         )
 
     site_dict = orm_to_config_dict(config)
-    org_defaults = await _load_org_defaults(current_user.organisation_id, db)
-    group_id = await _get_site_group_id(site_id, db)
-    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    org_defaults = await load_org_defaults(current_user.organisation_id, db)
+    group_id = await get_site_group_id(site_id, db)
+    group_defaults = await load_group_defaults(group_id, db) if group_id else None
 
     resolved = resolve_config(
         site_dict,
@@ -481,9 +482,9 @@ async def publish_config(
         )
 
     config_dict = orm_to_config_dict(config, include_id=True)
-    org_defaults = await _load_org_defaults(current_user.organisation_id, db)
-    group_id = await _get_site_group_id(site_id, db)
-    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    org_defaults = await load_org_defaults(current_user.organisation_id, db)
+    group_id = await get_site_group_id(site_id, db)
+    group_defaults = await load_group_defaults(group_id, db) if group_id else None
     resolved = resolve_config(
         config_dict,
         org_defaults=org_defaults,
@@ -508,81 +509,3 @@ async def publish_config(
         "path": publish_result.path,
         "published_at": publish_result.published_at,
     }
-
-
-# ── Helpers ──────────────────────────────────────────────────────────
-
-
-async def _get_site_org_id(site_id: uuid.UUID, db: AsyncSession) -> uuid.UUID | None:
-    """Look up the organisation_id for a site."""
-    result = await db.execute(select(Site.organisation_id).where(Site.id == site_id))
-    return result.scalar_one_or_none()
-
-
-async def _get_site_group_id(site_id: uuid.UUID, db: AsyncSession) -> uuid.UUID | None:
-    """Look up the site_group_id for a site, ignoring groups from another organisation."""
-    result = await db.execute(
-        select(Site.site_group_id)
-        .join(SiteGroup, SiteGroup.id == Site.site_group_id)
-        .where(Site.id == site_id, SiteGroup.organisation_id == Site.organisation_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def _load_org_defaults(organisation_id: uuid.UUID, db: AsyncSession) -> dict | None:
-    """Load the org-level config defaults, or None if not set."""
-    result = await db.execute(select(OrgConfig).where(OrgConfig.organisation_id == organisation_id))
-    org_config = result.scalar_one_or_none()
-    if org_config is None:
-        return None
-    return orm_to_config_dict(org_config)
-
-
-async def _load_group_defaults(group_id: uuid.UUID, db: AsyncSession) -> dict | None:
-    """Load the site-group-level config defaults, or None if not set."""
-    result = await db.execute(
-        select(SiteGroupConfig).where(SiteGroupConfig.site_group_id == group_id)
-    )
-    group_config = result.scalar_one_or_none()
-    if group_config is None:
-        return None
-    return orm_to_config_dict(group_config)
-
-
-async def _load_gvl_version(db: AsyncSession) -> int | None:
-    """Return the currently-cached IAB GVL version, or ``None`` if unsynced.
-
-    Surfaced into the public config so the banner can stamp it onto
-    generated TC strings (``vendorListVersion`` field).
-    """
-    result = await db.execute(select(IabGvlMeta.vendor_list_version).limit(1))
-    return result.scalar_one_or_none()
-
-
-async def _load_cookie_count(db: AsyncSession, site_id: uuid.UUID) -> int:
-    """Return the number of allow-listed cookies for the site.
-
-    Surfaced into the public config so the banner can render the optional
-    "N cookies used on this site" line when ``showCookieCount`` is enabled.
-    """
-    result = await db.execute(
-        select(func.count())
-        .select_from(CookieAllowListEntry)
-        .where(CookieAllowListEntry.site_id == site_id)
-    )
-    return int(result.scalar_one() or 0)
-
-
-async def _load_category_tcf_purposes(db: AsyncSession) -> dict[str, list[int]]:
-    """Return the cookie-category slug → TCF purpose IDs mapping.
-
-    The banner uses this to translate accepted cookie categories into
-    TCF purpose IDs when building TCData. Categories without a mapping
-    are omitted from the result.
-    """
-    result = await db.execute(
-        select(CookieCategory.slug, CookieCategory.tcf_purpose_ids).where(
-            CookieCategory.tcf_purpose_ids.isnot(None)
-        )
-    )
-    return {slug: ids for slug, ids in result.all() if ids}

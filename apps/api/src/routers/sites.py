@@ -9,11 +9,6 @@ from src.db import get_db
 from src.models.site import Site
 from src.models.site_config import SiteConfig
 from src.models.site_group import SiteGroup
-from src.routers.config import (
-    _get_site_group_id,
-    _load_group_defaults,
-    _load_org_defaults,
-)
 from src.schemas.auth import CurrentUser
 from src.schemas.site import (
     SiteConfigCreate,
@@ -23,6 +18,7 @@ from src.schemas.site import (
     SiteResponse,
     SiteUpdate,
 )
+from src.services.config_layers import get_site_group_id, load_group_defaults, load_org_defaults
 from src.services.config_resolver import orm_to_config_dict, resolve_config
 from src.services.dependencies import require_role
 
@@ -151,9 +147,9 @@ async def _editor_response(
     flattened, non-null payload the form needs to render.
     """
     site_dict = orm_to_config_dict(config)
-    org_defaults = await _load_org_defaults(organisation_id, db)
-    group_id = await _get_site_group_id(config.site_id, db)
-    group_defaults = await _load_group_defaults(group_id, db) if group_id else None
+    org_defaults = await load_org_defaults(organisation_id, db)
+    group_id = await get_site_group_id(config.site_id, db)
+    group_defaults = await load_group_defaults(group_id, db) if group_id else None
     resolved = resolve_config(
         site_dict,
         org_defaults=org_defaults,

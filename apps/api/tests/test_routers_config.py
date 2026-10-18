@@ -406,8 +406,8 @@ class TestPublicCookies:
         )
 
         with (
-            patch("src.routers.config._get_site_org_id", AsyncMock(return_value=None)),
-            patch("src.routers.config._get_site_group_id", AsyncMock(return_value=None)),
+            patch("src.routers.config.get_site_org_id", AsyncMock(return_value=None)),
+            patch("src.routers.config.get_site_group_id", AsyncMock(return_value=None)),
             patch(
                 "src.routers.config.resolve_config",
                 return_value={"enabled_categories": ["necessary"]},

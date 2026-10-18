@@ -16,6 +16,7 @@ from src.models.organisation import Organisation
 from src.models.scan import ScanJob, ScanResult
 from src.models.site import Site
 from src.models.site_config import SiteConfig
+from src.models.site_config_revision import SiteConfigRevision
 from src.models.site_group import SiteGroup
 from src.models.site_group_config import SiteGroupConfig
 from src.models.translation import Translation
@@ -42,6 +43,7 @@ __all__ = [
     "ScanResult",
     "Site",
     "SiteConfig",
+    "SiteConfigRevision",
     "SiteGroup",
     "SiteGroupConfig",
     "Translation",
