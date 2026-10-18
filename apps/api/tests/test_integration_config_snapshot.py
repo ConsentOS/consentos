@@ -17,6 +17,7 @@ from src.models.site_group import SiteGroup
 from src.models.site_group_config import SiteGroupConfig
 from src.models.translation import Translation
 from src.models.user import User
+from src.services.config_publishing import publish_draft
 from src.services.config_snapshot import (
     SiteNotFoundError,
     build_site_snapshot,
@@ -290,6 +291,10 @@ class TestGeoResolvedFixes:
                 )
             )
             site = await _make_site(session, org.id, group_id=group.id)
+            built = await build_site_snapshot(session, site.id)
+            await publish_draft(
+                session, site.id, expected_content_hash=built.content_hash, published_by=None
+            )
             await session.commit()
 
         resp = await db_client.get(

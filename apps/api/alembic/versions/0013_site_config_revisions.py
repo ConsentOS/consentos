@@ -5,7 +5,8 @@ Revises: 0012
 Create Date: 2026-10-18
 
 Immutable published snapshots of each site's config. A trigger rejects
-changes to a revision's recorded content.
+changes to a revision's recorded content. ``sites.live_revision_id``
+points at the revision the banner serves.
 """
 
 from collections.abc import Sequence
@@ -93,9 +94,23 @@ def upgrade() -> None:
     op.create_index("ix_site_config_revisions_site_id", "site_config_revisions", ["site_id"])
     op.execute(REJECT_UPDATE_FUNCTION)
     op.execute(REJECT_UPDATE_TRIGGER)
+    op.add_column(
+        "sites",
+        sa.Column("live_revision_id", postgresql.UUID(as_uuid=True), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_sites_live_revision_id",
+        "sites",
+        "site_config_revisions",
+        ["live_revision_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("fk_sites_live_revision_id", "sites", type_="foreignkey")
+    op.drop_column("sites", "live_revision_id")
     op.execute(
         "DROP TRIGGER IF EXISTS site_config_revisions_reject_update ON site_config_revisions"
     )
