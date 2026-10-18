@@ -19,6 +19,23 @@ interface Props {
 }
 
 export default function CreateSiteModal({ onClose, defaultGroupId }: Props) {
+  return (
+    <Modal open={true} onClose={onClose} title="Add site">
+      <CreateSiteForm onDone={onClose} onCancel={onClose} defaultGroupId={defaultGroupId} />
+    </Modal>
+  );
+}
+
+interface FormProps {
+  /** Called after the site is created, before opening it. */
+  onDone?: () => void;
+  /** Shows a Cancel button that calls this. */
+  onCancel?: () => void;
+  defaultGroupId?: string;
+}
+
+/** Adds a site, then opens it on its setup checklist. */
+export function CreateSiteForm({ onDone, onCancel, defaultGroupId }: FormProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [domain, setDomain] = useState('');
@@ -37,7 +54,7 @@ export default function CreateSiteModal({ onClose, defaultGroupId }: Props) {
       queryClient.invalidateQueries({ queryKey: ['sites'] });
       queryClient.invalidateQueries({ queryKey: ['site-groups'] });
       trackFeatureUsage('site', 'create');
-      onClose();
+      onDone?.();
       // Straight to the new site, where its setup checklist starts.
       navigate(`/sites/${site.id}`);
     },
@@ -57,31 +74,31 @@ export default function CreateSiteModal({ onClose, defaultGroupId }: Props) {
   };
 
   return (
-    <Modal open={true} onClose={onClose} title="Add site">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {error && <Alert variant="error">{error}</Alert>}
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && <Alert variant="error">{error}</Alert>}
 
-        <FormField label="Domain">
-          <Input
-            id="domain"
-            type="text"
-            required
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            placeholder="example.com"
-          />
-        </FormField>
+      <FormField label="Domain">
+        <Input
+          id="domain"
+          type="text"
+          required
+          value={domain}
+          onChange={(e) => setDomain(e.target.value)}
+          placeholder="example.com"
+        />
+      </FormField>
 
-        <FormField label="Display name (optional)">
-          <Input
-            id="name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My Website"
-          />
-        </FormField>
+      <FormField label="Display name (optional)">
+        <Input
+          id="name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="My Website"
+        />
+      </FormField>
 
+      {groups && groups.length > 0 && (
         <FormField label="Site group (optional)">
           <Select
             id="group"
@@ -89,27 +106,29 @@ export default function CreateSiteModal({ onClose, defaultGroupId }: Props) {
             onChange={(e) => setGroupId(e.target.value)}
           >
             <option value="">No group</option>
-            {groups?.map((g) => (
+            {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
               </option>
             ))}
           </Select>
         </FormField>
+      )}
 
-        <p className="text-xs text-text-secondary">
-          We'll start scanning your site for cookies as soon as it's added.
-        </p>
+      <p className="text-xs text-text-secondary">
+        We'll start scanning your site for cookies as soon as it's added.
+      </p>
 
-        <div className="flex justify-end gap-3 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+      <div className="flex justify-end gap-3 pt-2">
+        {onCancel && (
+          <Button type="button" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit" disabled={mutation.isPending}>
-            {mutation.isPending ? 'Creating...' : 'Create site'}
-          </Button>
-        </div>
-      </form>
-    </Modal>
+        )}
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? 'Creating...' : 'Create site'}
+        </Button>
+      </div>
+    </form>
   );
 }

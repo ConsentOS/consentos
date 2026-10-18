@@ -26,7 +26,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 describe('adding the first site', () => {
-  it('offers to add a site, then opens it', async () => {
+  it('shows the form straight away when there are no sites, then opens the new site', async () => {
     mockCreateSite.mockResolvedValue({ id: 'new-site' });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -37,7 +37,10 @@ describe('adding the first site', () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add your first site' }));
+    expect(await screen.findByRole('heading', { name: 'Add your first site' })).toBeInTheDocument();
+    // No groups exist yet, so there is nothing to choose.
+    expect(screen.queryByText('Site group (optional)')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('example.com'), {
       target: { value: 'shop.example' },
     });

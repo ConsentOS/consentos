@@ -1,6 +1,6 @@
 # Setting up a site
 
-Adding a site opens it with a **setup checklist** on its **Overview**, which takes it from nothing to a working banner. The site's first cookie scan starts as soon as it is added.
+An organisation with no sites yet sees **Add your first site** on the **Sites** page, with the form ready to fill in. Adding a site opens it with a **setup checklist** on its **Overview**, which takes it from nothing to a working banner. The site's first cookie scan starts as soon as it is added.
 
 | Step | Done when |
 | --- | --- |

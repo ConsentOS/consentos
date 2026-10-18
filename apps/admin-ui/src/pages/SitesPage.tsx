@@ -6,7 +6,8 @@ import { createSiteGroup, deleteSiteGroup, listSiteGroups } from '../api/site-gr
 import { listInstallations } from '../api/installation';
 import { listSetupSummaries } from '../api/setup';
 import { listSites, updateSite } from '../api/sites';
-import CreateSiteModal from '../components/CreateSiteModal';
+import CreateSiteModal, { CreateSiteForm } from '../components/CreateSiteModal';
+import { Card } from '../components/ui/card.tsx';
 import { InstallationBadge } from '../components/InstallationStatus';
 import { Button } from '../components/ui/button.tsx';
 import { Badge } from '../components/ui/badge.tsx';
@@ -111,10 +112,16 @@ export default function SitesPage() {
       )}
 
       {!isLoading && sites && sites.length === 0 && (!groups || groups.length === 0) && (
-        <EmptyState
-          message="No sites yet. Add your first site and we'll scan it and guide you through setting up its banner."
-          action={<Button onClick={() => setShowCreate(true)}>Add your first site</Button>}
-        />
+        <Card className="mx-auto max-w-lg p-6">
+          <h2 className="font-heading text-lg font-semibold text-foreground">
+            Add your first site
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-text-secondary">
+            Enter your website's domain. We'll scan it for cookies and guide you through
+            setting up its banner.
+          </p>
+          <CreateSiteForm />
+        </Card>
       )}
 
       {!isLoading && (
