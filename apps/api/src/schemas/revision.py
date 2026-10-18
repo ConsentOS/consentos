@@ -142,3 +142,10 @@ class BulkPublishResult(BaseModel):
 class BulkPublishResponse(BaseModel):
     batch_id: uuid.UUID
     results: list[BulkPublishResult]
+
+
+class PreviewLink(BaseModel):
+    token: str
+    expires_at: datetime
+    # The site's home page with the token, ready to open.
+    url: str

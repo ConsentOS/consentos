@@ -2,6 +2,7 @@
 
 import uuid
 from collections.abc import Awaitable, Callable
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -18,6 +19,7 @@ from src.schemas.revision import (
     BulkPublishResponse,
     DiffResponse,
     DraftStatusResponse,
+    PreviewLink,
     PublishRequest,
     RevisionDetail,
     RevisionList,
@@ -25,6 +27,7 @@ from src.schemas.revision import (
     RollbackRequest,
 )
 from src.services.config_diff import EMPTY, Version, diff_versions
+from src.services.config_preview import create_preview_token
 from src.services.config_publishing import (
     AffectedSite,
     DraftStatus,
@@ -144,6 +147,27 @@ async def bulk_publish_sites(
         requires_reconsent=body.ask_visitors_again,
     )
     return {"batch_id": batch_id, "results": results}
+
+
+@router.post("/sites/{site_id}/preview", response_model=PreviewLink)
+async def create_preview_link(
+    site_id: uuid.UUID,
+    current_user: CurrentUser = Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """A short-lived link that shows the draft on the real site. Requires admin role.
+
+    Only someone holding the link sees the draft; visitors keep getting
+    the live revision.
+    """
+    await _require_org_site(site_id, current_user, db)
+    site = await db.get(Site, site_id)
+    token, expires_at = create_preview_token(site_id)
+    return {
+        "token": token,
+        "expires_at": expires_at,
+        "url": f"https://{site.domain}/?{urlencode({'consentos_preview': token})}",
+    }
 
 
 @router.get("/sites/{site_id}/revisions", response_model=RevisionList)

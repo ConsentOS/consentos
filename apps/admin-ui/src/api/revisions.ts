@@ -4,6 +4,7 @@ import type {
   BulkPublishResponse,
   ConfigDiff,
   DraftStatus,
+  PreviewLink,
   RevisionDetail,
   RevisionList,
   RevisionSummary,
@@ -80,6 +81,12 @@ export async function bulkPublish(body: {
   ask_visitors_again: boolean;
 }): Promise<BulkPublishResponse> {
   const { data } = await apiClient.post<BulkPublishResponse>('/config/bulk-publish', body);
+  return data;
+}
+
+/** A short-lived link that shows the draft on the real site. */
+export async function createPreviewLink(siteId: string): Promise<PreviewLink> {
+  const { data } = await apiClient.post<PreviewLink>(`/config/sites/${siteId}/preview`);
   return data;
 }
 

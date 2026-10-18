@@ -65,6 +65,11 @@ export interface SiteConfig {
    * Absent from the built-in defaults.
    */
   revision_id?: string | null;
+  /**
+   * Set when this is an unpublished draft shown through a preview link.
+   * Nothing is stored or recorded as consent while previewing.
+   */
+  preview?: boolean;
   /** Initiator map: root script URL → category for root-level blocking. */
   initiator_map: InitiatorMapping[] | null;
   /**

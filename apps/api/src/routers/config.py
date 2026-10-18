@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,13 +17,18 @@ from src.services.config_layers import (
     load_group_defaults,
     load_org_defaults,
 )
+from src.services.config_preview import preview_site_id
 from src.services.config_publishing import get_live_revision
 from src.services.config_resolver import (
     CONFIG_FIELDS,
     orm_to_config_dict,
     resolve_config,
 )
-from src.services.config_snapshot import render_public_config
+from src.services.config_snapshot import (
+    SiteNotFoundError,
+    build_site_snapshot,
+    render_public_config,
+)
 from src.services.dependencies import require_role
 from src.services.geoip import detect_region
 
@@ -118,7 +123,9 @@ async def get_resolved_config(
 async def get_geo_resolved_config(
     site_id: uuid.UUID,
     request: Request,
+    response: Response,
     locale: str | None = None,
+    preview: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Public endpoint: the live revision for the visitor's detected region.
@@ -130,7 +137,14 @@ async def get_geo_resolved_config(
     Pass ``?locale=`` to receive that locale's banner translation in the
     response (base-language fallback applies); omit it for none. The
     response therefore varies by site, country and locale.
+
+    Pass a valid ``?preview=`` token for this site to get the current
+    draft instead, marked ``preview: true``. An expired or altered token
+    gets the live revision, as if no token were given.
     """
+    if preview and preview_site_id(preview) == site_id:
+        return await _preview_config(site_id, request, response, locale, db)
+
     revision = await _require_live_revision(site_id, db)
     geo = await detect_region(request)
     public = render_public_config(
@@ -144,6 +158,36 @@ async def get_geo_resolved_config(
     public["detected_region"] = geo.region
     # Sent back with each consent so the record shows what was served.
     public["revision_id"] = str(revision.id)
+    return public
+
+
+async def _preview_config(
+    site_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    locale: str | None,
+    db: AsyncSession,
+) -> dict:
+    try:
+        built = await build_site_snapshot(db, site_id)
+    except SiteNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found") from exc
+    geo = await detect_region(request)
+    public = render_public_config(
+        built.snapshot,
+        site_id=site_id,
+        # The banner stores nothing while previewing, so this is never
+        # compared with a visitor's consent.
+        consent_version="preview",
+        region=geo.region,
+        locale=locale,
+    )
+    public["detected_country"] = geo.country_code
+    public["detected_region"] = geo.region
+    public["revision_id"] = None
+    public["preview"] = True
+    # Drafts change and are only for the token holder: never cache them.
+    response.headers["Cache-Control"] = "no-store"
     return public
 
 

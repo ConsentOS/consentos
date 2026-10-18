@@ -167,4 +167,25 @@ describe('banner wiring', () => {
     await boot({});
     expect(bannerShown()).toBe(false);
   });
+
+  it('stores and records nothing while previewing a draft', async () => {
+    await boot({ preview: true });
+    click('accept');
+    expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/api/v1/consent/'))).toBe(false);
+    expect(document.cookie).not.toContain('_consentos_consent');
+  });
+
+  it('shows the banner in a preview even when the holder has consented', async () => {
+    const { readConsent } = await import('../consent');
+    vi.mocked(readConsent).mockReturnValue({
+      accepted: ['necessary'],
+      rejected: [],
+      visitorId: 'v1',
+      consentedAt: new Date().toISOString(),
+      bannerVersion: '1',
+      configVersion: 'cfg-1',
+    } as ConsentState);
+    await boot({ preview: true });
+    expect(bannerShown()).toBe(true);
+  });
 });
