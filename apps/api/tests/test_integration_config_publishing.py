@@ -25,17 +25,21 @@ async def _draft(client, headers, site_id) -> dict:
     return resp.json()
 
 
-async def _publish(client, headers, site_id, content_hash, note=None):
+async def _publish(client, headers, site_id, content_hash, note=None, ask_again=False):
     return await client.post(
         f"/api/v1/config/sites/{site_id}/publish",
         headers=headers,
-        json={"expected_content_hash": content_hash, "note": note},
+        json={
+            "expected_content_hash": content_hash,
+            "note": note,
+            "ask_visitors_again": ask_again,
+        },
     )
 
 
-async def _publish_draft(client, headers, site_id, note=None) -> dict:
+async def _publish_draft(client, headers, site_id, note=None, ask_again=False) -> dict:
     draft = await _draft(client, headers, site_id)
-    resp = await _publish(client, headers, site_id, draft["content_hash"], note)
+    resp = await _publish(client, headers, site_id, draft["content_hash"], note, ask_again)
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -142,6 +146,36 @@ class TestPublishLifecycle:
         async with AsyncSession(_test_engine) as session:
             revision = await session.get(SiteConfigRevision, uuid.UUID(published["id"]))
         assert revision.snapshot["config"]["privacy_policy_url"] is None
+
+
+@requires_db
+class TestReconsent:
+    async def test_asking_again_changes_the_consent_version(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _publish_draft(db_client, auth_headers, site_id)
+        before = (await _banner(db_client, site_id)).json()["id"]
+
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/t")
+        published = await _publish_draft(db_client, auth_headers, site_id, ask_again=True)
+
+        after = (await _banner(db_client, site_id)).json()["id"]
+        assert after != before
+        assert after == published["consent_version"]
+        assert published["requires_reconsent"] is True
+
+    async def test_category_change_is_flagged(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _publish_draft(db_client, auth_headers, site_id)
+        assert (await _draft(db_client, auth_headers, site_id))["reconsent_reasons"] == []
+
+        await _edit(db_client, auth_headers, site_id, enabled_categories=["necessary"])
+
+        draft = await _draft(db_client, auth_headers, site_id)
+        assert draft["reconsent_reasons"] == ["categories"]
+
+    async def test_first_publish_suggests_nothing(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        assert (await _draft(db_client, auth_headers, site_id))["reconsent_reasons"] == []
 
 
 @requires_db

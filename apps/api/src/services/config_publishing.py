@@ -43,6 +43,33 @@ class DraftStatus:
     content_hash: str
     has_unpublished_changes: bool
     changed_sources: list[dict[str, Any]]
+    # What changed that visitors consented to, e.g. ``["categories"]``.
+    # When non-empty the publish dialog pre-ticks "Ask visitors to
+    # consent again".
+    reconsent_reasons: list[str]
+
+
+# What a visitor's consent covers, by where it sits in a snapshot. A
+# change to any of these is reason to ask visitors again.
+_CONSENT_SCOPE: dict[str, tuple[str, str | None]] = {
+    "categories": ("config", "enabled_categories"),
+    "purposes": ("category_tcf_purposes", None),
+    "vendors": ("config", "disclosed_vendor_ids"),
+}
+
+
+def reconsent_reasons(live: dict[str, Any], draft: dict[str, Any]) -> list[str]:
+    """Name what changed between two snapshots that visitors consented to."""
+
+    def scoped(snapshot: dict[str, Any], section: str, key: str | None) -> Any:
+        value = snapshot.get(section)
+        return value.get(key) if key and isinstance(value, dict) else value
+
+    return [
+        reason
+        for reason, (section, key) in _CONSENT_SCOPE.items()
+        if scoped(live, section, key) != scoped(draft, section, key)
+    ]
 
 
 async def get_live_revision(db: AsyncSession, site_id: uuid.UUID) -> SiteConfigRevision | None:
@@ -69,12 +96,15 @@ async def get_draft_status(db: AsyncSession, site_id: uuid.UUID) -> DraftStatus:
             content_hash=built.content_hash,
             has_unpublished_changes=True,
             changed_sources=[],
+            # Nobody has consented to a site that was never published.
+            reconsent_reasons=[],
         )
     return DraftStatus(
         live_revision=live,
         content_hash=built.content_hash,
         has_unpublished_changes=built.content_hash != live.content_hash,
         changed_sources=changed_sources(live.sources, built.sources),
+        reconsent_reasons=reconsent_reasons(live.snapshot, built.snapshot),
     )
 
 
@@ -85,12 +115,17 @@ async def publish_draft(
     expected_content_hash: str,
     published_by: uuid.UUID | None,
     note: str | None = None,
+    requires_reconsent: bool = False,
 ) -> SiteConfigRevision:
     """Freeze the current draft into a new live revision.
 
     ``expected_content_hash`` is the draft hash the publisher reviewed.
     If the draft has changed since, the publish is refused so nobody
     publishes changes they haven't seen.
+
+    The new revision keeps the live revision's consent version, so
+    returning visitors aren't asked again, unless ``requires_reconsent``
+    is set, which gives it a new one.
 
     Raises:
         SiteNotFoundError: the site doesn't exist or isn't active.
@@ -126,7 +161,8 @@ async def publish_draft(
     revision = SiteConfigRevision(
         site_id=site_id,
         number=await _next_revision_number(db, site_id),
-        consent_version=live.consent_version if live else uuid.uuid4(),
+        consent_version=(live.consent_version if live and not requires_reconsent else uuid.uuid4()),
+        requires_reconsent=requires_reconsent,
         snapshot=built.snapshot,
         site_layer=built.site_layer,
         sources=built.sources,
