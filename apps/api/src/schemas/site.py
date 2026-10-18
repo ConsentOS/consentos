@@ -160,3 +160,15 @@ class SiteConfigResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SiteInstallResponse(BaseModel):
+    """What a site needs to install the banner."""
+
+    api_base: str | None = Field(
+        description="Where browsers reach the API, or null to use the admin UI's address."
+    )
+    cdn_base: str | None = Field(
+        description="Where the banner scripts are served, or null to use the admin UI's address."
+    )
+    domains: list[str] = Field(description="The domains the banner works on.")

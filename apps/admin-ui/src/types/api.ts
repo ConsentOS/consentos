@@ -26,6 +26,7 @@ export interface Site {
   name: string | null;
   display_name: string;
   is_active: boolean;
+  additional_domains: string[] | null;
   site_group_id: string | null;
   /** ``null`` until the site's first publish. */
   live_revision_id: string | null;
@@ -297,6 +298,13 @@ export interface TokenResponse {
   access_token: string;
   refresh_token: string;
   token_type: string;
+}
+
+/** Addresses and domains for a site's install snippet. Null means "use the admin UI's address". */
+export interface SiteInstall {
+  api_base: string | null;
+  cdn_base: string | null;
+  domains: string[];
 }
 
 export interface ScanJob {

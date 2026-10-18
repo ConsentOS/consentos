@@ -14,6 +14,7 @@ function site(overrides: Partial<Site>): Site {
     name: null,
     display_name: 'Published',
     is_active: true,
+    additional_domains: null,
     site_group_id: null,
     live_revision_id: 'rev-1',
     created_at: '2026-10-01T00:00:00Z',
