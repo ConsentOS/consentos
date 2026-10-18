@@ -58,6 +58,12 @@ export async function publishDraft(
   return data;
 }
 
+/** Put the site's own values back to the live revision. */
+export async function discardDraft(siteId: string): Promise<DraftStatus> {
+  const { data } = await apiClient.post<DraftStatus>(`/config/sites/${siteId}/discard`);
+  return data;
+}
+
 /** The API's own explanation of a failed request, or ``fallback``. */
 export function apiErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;

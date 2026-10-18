@@ -26,6 +26,7 @@ from src.services.config_publishing import (
     PublishError,
     RevisionEntry,
     RevisionNotFoundError,
+    discard_draft,
     get_draft_status,
     get_live_revision,
     get_revision,
@@ -77,6 +78,27 @@ async def publish_config(
             requires_reconsent=body.ask_visitors_again,
         ),
     )
+
+
+@router.post("/sites/{site_id}/discard", response_model=DraftStatusResponse)
+async def discard(
+    site_id: uuid.UUID,
+    current_user: CurrentUser = Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+) -> DraftStatus:
+    """Put the site's own values back to the live revision. Requires admin role.
+
+    Returns the draft status afterwards, which still shows unpublished
+    changes if inherited defaults have changed.
+    """
+    await _require_org_site(site_id, current_user, db)
+    try:
+        await discard_draft(db, site_id)
+    except SiteNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found") from exc
+    except PublishError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
+    return await get_draft_status(db, site_id)
 
 
 @router.get("/sites/{site_id}/revisions", response_model=RevisionList)

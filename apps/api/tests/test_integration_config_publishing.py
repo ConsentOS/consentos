@@ -579,6 +579,105 @@ class TestDiff:
         assert resp.status_code == 404
 
 
+async def _discard(client, headers, site_id):
+    return await client.post(f"/api/v1/config/sites/{site_id}/discard", headers=headers)
+
+
+@requires_db
+class TestDiscard:
+    async def test_restores_the_sites_own_values(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        analytics = await _category_id(db_client, auth_headers, "analytics")
+        marketing = await _category_id(db_client, auth_headers, "marketing")
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/published")
+        await _translate(db_client, auth_headers, site_id, "fr", {"title": "Publié"})
+        cookie = (
+            await db_client.post(
+                f"/api/v1/cookies/sites/{site_id}",
+                headers=auth_headers,
+                json={"name": "_ga", "domain": ".x.test", "category_id": analytics},
+            )
+        ).json()
+        await db_client.post(
+            f"/api/v1/cookies/sites/{site_id}/allow-list",
+            headers=auth_headers,
+            json={"name_pattern": "_ga", "domain_pattern": "*", "category_id": analytics},
+        )
+        await _publish_draft(db_client, auth_headers, site_id)
+
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/draft")
+        await _translate(db_client, auth_headers, site_id, "fr", {"title": "Brouillon"})
+        await _translate(db_client, auth_headers, site_id, "de", {"title": "Entwurf"})
+        await db_client.patch(
+            f"/api/v1/cookies/sites/{site_id}/{cookie['id']}",
+            headers=auth_headers,
+            json={"category_id": marketing, "review_status": "rejected"},
+        )
+        await db_client.post(
+            f"/api/v1/cookies/sites/{site_id}/allow-list",
+            headers=auth_headers,
+            json={"name_pattern": "_fbp", "domain_pattern": "*", "category_id": marketing},
+        )
+        assert (await _draft(db_client, auth_headers, site_id))["has_unpublished_changes"]
+
+        resp = await _discard(db_client, auth_headers, site_id)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["has_unpublished_changes"] is False
+        assert (await _diff(db_client, auth_headers, site_id))["changes"] == []
+        config = (
+            await db_client.get(f"/api/v1/sites/{site_id}/config", headers=auth_headers)
+        ).json()
+        assert config["terms_url"] == "https://x.test/published"
+        translations = (
+            await db_client.get(f"/api/v1/sites/{site_id}/translations/", headers=auth_headers)
+        ).json()
+        assert {t["locale"]: t["strings"] for t in translations} == {"fr": {"title": "Publié"}}
+        restored = (
+            await db_client.get(f"/api/v1/cookies/sites/{site_id}", headers=auth_headers)
+        ).json()[0]
+        assert (restored["category_id"], restored["review_status"]) == (analytics, "pending")
+        allow_list = (
+            await db_client.get(f"/api/v1/cookies/sites/{site_id}/allow-list", headers=auth_headers)
+        ).json()
+        assert [e["name_pattern"] for e in allow_list] == ["_ga"]
+
+    async def test_inherited_changes_remain(self, db_client, auth_headers, _test_engine, test_org):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/draft")
+        async with AsyncSession(_test_engine) as session:
+            org_config = (
+                await session.execute(
+                    select(OrgConfig).where(OrgConfig.organisation_id == test_org.id)
+                )
+            ).scalar_one_or_none()
+            if org_config is None:
+                org_config = OrgConfig(organisation_id=test_org.id)
+                session.add(org_config)
+            org_config.privacy_policy_url = f"https://org/{uuid.uuid4().hex}"
+            await session.commit()
+
+        status = (await _discard(db_client, auth_headers, site_id)).json()
+
+        assert status["has_unpublished_changes"] is True
+        changes = (await _diff(db_client, auth_headers, site_id))["changes"]
+        assert [(c["key"], c["source"]) for c in changes] == [
+            ("privacy_policy_url", "organisation")
+        ]
+
+    async def test_needs_a_live_revision(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        resp = await _discard(db_client, auth_headers, site_id)
+        assert resp.status_code == 409
+        assert resp.json()["detail"].startswith("Nothing has been published yet")
+
+    async def test_other_org_cannot_discard(self, db_client, auth_headers, other_org_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _publish_draft(db_client, auth_headers, site_id)
+        assert (await _discard(db_client, other_org_headers, site_id)).status_code == 404
+
+
 @requires_db
 class TestOrgScoping:
     async def test_other_org_cannot_see_or_publish(

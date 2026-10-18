@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ConfigDiffView from '../components/ConfigDiffView';
@@ -12,6 +12,7 @@ import type { ConfigDiff, DiffChange, DraftStatus } from '../types/api';
 const mockGetDraftStatus = vi.fn<(siteId: string) => Promise<DraftStatus>>();
 const mockGetDiff = vi.fn<(siteId: string, params?: unknown) => Promise<ConfigDiff>>();
 const mockPublish = vi.fn();
+const mockDiscard = vi.fn();
 
 vi.mock('../api/revisions', async () => {
   const actual = await vi.importActual<typeof import('../api/revisions')>('../api/revisions');
@@ -20,6 +21,7 @@ vi.mock('../api/revisions', async () => {
     getDraftStatus: (siteId: string) => mockGetDraftStatus(siteId),
     getDiff: (siteId: string, params?: unknown) => mockGetDiff(siteId, params),
     publishDraft: (...args: unknown[]) => mockPublish(...args),
+    discardDraft: (siteId: string) => mockDiscard(siteId),
   };
 });
 
@@ -80,7 +82,50 @@ beforeEach(() => {
   mockGetDraftStatus.mockReset();
   mockGetDiff.mockReset();
   mockPublish.mockReset();
+  mockDiscard.mockReset();
   signInAs('owner');
+});
+
+describe('Discarding', () => {
+  it('confirms, then discards', async () => {
+    mockGetDraftStatus.mockResolvedValue(draft());
+    mockDiscard.mockResolvedValue(draft({ has_unpublished_changes: false }));
+    renderWithQuery(<UnpublishedChangesBar siteId="site-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    expect(screen.getByText(/go back to how they were in v3/)).toBeInTheDocument();
+    expect(screen.getByText(/inherited from organisation or site group/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard changes' }));
+
+    await waitFor(() => expect(mockDiscard).toHaveBeenCalledWith('site-1'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('shows why a discard failed', async () => {
+    mockGetDraftStatus.mockResolvedValue(draft());
+    mockDiscard.mockRejectedValue({ response: { data: { detail: 'Site not found' } } });
+    renderWithQuery(<UnpublishedChangesBar siteId="site-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard changes' }));
+
+    expect(await screen.findByText('Site not found')).toBeInTheDocument();
+  });
+
+  it('is not offered to editors or before the first publish', async () => {
+    signInAs('editor');
+    mockGetDraftStatus.mockResolvedValue(draft());
+    const { unmount } = renderWithQuery(<UnpublishedChangesBar siteId="site-1" />);
+    await screen.findByText('Unpublished changes since v3');
+    expect(screen.queryByRole('button', { name: 'Discard changes' })).not.toBeInTheDocument();
+    unmount();
+
+    signInAs('owner');
+    mockGetDraftStatus.mockResolvedValue(draft({ live_revision: null }));
+    renderWithQuery(<UnpublishedChangesBar siteId="site-1" />);
+    await screen.findByText('Not yet published');
+    expect(screen.queryByRole('button', { name: 'Discard changes' })).not.toBeInTheDocument();
+  });
 });
 
 describe('UnpublishedChangesBar', () => {
