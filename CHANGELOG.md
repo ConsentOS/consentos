@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.0] - 2026-10-18
+### :sparkles: New Features
+- [`98bdd6a`](https://github.com/ConsentOS/consentos/commit/98bdd6a7dd59685ab24c4b472a3bde1942f9048f) - **api**: pluggable auth provider *(PR [#51](https://github.com/ConsentOS/consentos/pull/51) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`4d93fa8`](https://github.com/ConsentOS/consentos/commit/4d93fa845828f8a38fd691f6aabbab9bcc513a2f) - **api**: scope site and site group lookups to the organisation *(PR [#59](https://github.com/ConsentOS/consentos/pull/59) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`88e03e4`](https://github.com/ConsentOS/consentos/commit/88e03e47d389d914053ea8ce306194e9dd8c7dbc) - **api**: restrict shared known-cookie edits to platform admins *(PR [#63](https://github.com/ConsentOS/consentos/pull/63) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`1016cd7`](https://github.com/ConsentOS/consentos/commit/1016cd7cbd6389c7d273b21ab55378c0068bb461) - **admin-ui**: let an extension provide sign-in *(PR [#66](https://github.com/ConsentOS/consentos/pull/66) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`057b971`](https://github.com/ConsentOS/consentos/commit/057b971de93996fe653cdb9f363f1c56cf067169) - publish configuration as versioned revisions with rollback *(PR [#71](https://github.com/ConsentOS/consentos/pull/71) by [@jamescottrill](https://github.com/jamescottrill))*
+
+### :bug: Bug Fixes
+- [`60d8050`](https://github.com/ConsentOS/consentos/commit/60d80505bed6a3470a0ae0c32030065d9ee80bb9) - **api**: scheduled scan check now respects the cron interval *(PR [#50](https://github.com/ConsentOS/consentos/pull/50) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`ef8916c`](https://github.com/ConsentOS/consentos/commit/ef8916cfca30ab3c9f7db7629b1a994b0dd82c32) - **banner**: send booleans to Shopify consent API *(PR [#56](https://github.com/ConsentOS/consentos/pull/56) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`0fab99c`](https://github.com/ConsentOS/consentos/commit/0fab99c12bcf0dc92c8e7e1875efbb19ef4647e9) - **api**: stop autogenerate dropping extension tables *(PR [#57](https://github.com/ConsentOS/consentos/pull/57) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`d6681fd`](https://github.com/ConsentOS/consentos/commit/d6681fd64f75059f864b3e507ec3fce9ad7b1275) - **api**: only trust forwarded client IP headers from configured proxies *(PR [#58](https://github.com/ConsentOS/consentos/pull/58) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`9c1a191`](https://github.com/ConsentOS/consentos/commit/9c1a191d376171453ad312041175b39a68953bc0) - **scanner**: restrict navigation to public hosts and site domains *(PR [#60](https://github.com/ConsentOS/consentos/pull/60) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`860ca0a`](https://github.com/ConsentOS/consentos/commit/860ca0af5ab1dad10c9f51fa93f4597e1a7636d1) - **banner**: intercept dynamically inserted scripts before insertion *(PR [#61](https://github.com/ConsentOS/consentos/pull/61) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`193bdcc`](https://github.com/ConsentOS/consentos/commit/193bdcc3afd61dc89559201e3fac4415ea39cf66) - validate banner config values and escape translated text *(PR [#62](https://github.com/ConsentOS/consentos/pull/62) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`7373d9f`](https://github.com/ConsentOS/consentos/commit/7373d9ff60a76bf3fe416a2e748afa8d48cbec17) - **api**: check site and origin when recording consent *(PR [#65](https://github.com/ConsentOS/consentos/pull/65) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`18e40cf`](https://github.com/ConsentOS/consentos/commit/18e40cf7386ba7b0404d9bafb7adab3a571463b0) - **api**: store GPC and GPP signals on consent records *(PR [#64](https://github.com/ConsentOS/consentos/pull/64) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`f1ca758`](https://github.com/ConsentOS/consentos/commit/f1ca758d243b3f84b7a8ce12fa9354e2077f7edf) - **helm**: reject the placeholder JWT secret at render time *(PR [#67](https://github.com/ConsentOS/consentos/pull/67) by [@jamescottrill](https://github.com/jamescottrill))*
+
+### :recycle: Refactors
+- [`8802aaf`](https://github.com/ConsentOS/consentos/commit/8802aaf2caedd669b9a57e539e3bb48f4fca94f8) - **admin**: drop GTM and the banner embed from the admin UI *(PR [#68](https://github.com/ConsentOS/consentos/pull/68) by [@jamescottrill](https://github.com/jamescottrill))*
+- [`ced32b4`](https://github.com/ConsentOS/consentos/commit/ced32b4bc293ea37b4406a8c0bdc85c6eed501b5) - register extensions through entry points and wire banner features *(PR [#70](https://github.com/ConsentOS/consentos/pull/70) by [@jamescottrill](https://github.com/jamescottrill))*
+
+### :wrench: Chores
+- [`be86ca5`](https://github.com/ConsentOS/consentos/commit/be86ca5ae69c95e8a36fcc42585512f8bbd92009) - **release**: v0.3.0 [skip ci] *(commit by [@jamescottrill](https://github.com/jamescottrill))*
+- [`1ad7103`](https://github.com/ConsentOS/consentos/commit/1ad7103a55825181fd28394314c57ea3992ae215) - remove unused code and columns *(PR [#69](https://github.com/ConsentOS/consentos/pull/69) by [@jamescottrill](https://github.com/jamescottrill))*
+
+
 ## [v0.3.0] - 2026-06-28
 ### :sparkles: New Features
 - [`36ad1ed`](https://github.com/ConsentOS/consentos/commit/36ad1ed2c01d006874027bf842e169a988340cdf) - **banner**: lifecycle events and cross-tab consent sync (CMP-126) *(PR [#41](https://github.com/ConsentOS/consentos/pull/41) by [@jamescottrill](https://github.com/jamescottrill))*
@@ -62,3 +91,4 @@ Initial public release of ConsentOS.
 - **CI:** GitHub Actions pipeline with linting, testing, type checking, and bundle size checks
 [v0.2.0]: https://github.com/ConsentOS/consentos/compare/0.1.0...v0.2.0
 [v0.3.0]: https://github.com/ConsentOS/consentos/compare/v0.2.0...v0.3.0
+[v0.4.0]: https://github.com/ConsentOS/consentos/compare/v0.3.0...v0.4.0
