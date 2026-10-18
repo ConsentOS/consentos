@@ -387,6 +387,7 @@ async def publish_config(
             expected_content_hash=body.expected_content_hash,
             published_by=current_user.id,
             note=body.note,
+            requires_reconsent=body.ask_visitors_again,
         )
     except SiteNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found") from exc
