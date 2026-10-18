@@ -460,3 +460,26 @@ export interface RevisionDetail extends RevisionListItem {
   sources: { kind: string; id: string; content_hash: string }[];
   rollback_reconsent_reasons: ReconsentReason[];
 }
+
+export type ChangeSource = 'site' | 'site_group' | 'organisation' | 'system';
+
+export interface DiffChange {
+  area: 'settings' | 'banner' | 'translations' | 'categories' | 'cookies' | 'other';
+  key: string;
+  before: unknown;
+  after: unknown;
+  source: ChangeSource;
+}
+
+export interface DiffSide {
+  revision_id: string | null;
+  number: number | null;
+  content_hash: string | null;
+}
+
+export interface ConfigDiff {
+  from: DiffSide | null;
+  to: DiffSide;
+  changes: DiffChange[];
+  reconsent_reasons: ReconsentReason[];
+}

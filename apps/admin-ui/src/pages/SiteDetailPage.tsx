@@ -10,6 +10,7 @@ import SiteOverviewTab from '../components/SiteOverviewTab';
 import BannerBuilderTab from '../components/BannerBuilderTab';
 import SiteScannerTab from '../components/SiteScannerTab';
 import SiteHistoryTab from '../components/SiteHistoryTab';
+import UnpublishedChangesBar from '../components/UnpublishedChangesBar';
 import SiteTranslationsTab from '../components/SiteTranslationsTab';
 import { LoadingState } from '../components/ui/loading-state.tsx';
 import { getSiteDetailTabs } from '../extensions/registry';
@@ -95,6 +96,8 @@ export default function SiteDetailPage() {
           ))}
         </div>
       </div>
+
+      {siteId && <UnpublishedChangesBar siteId={siteId} />}
 
       {/* Tab content — core tabs */}
       {activeTab === 'overview' && <SiteOverviewTab site={site} config={config ?? null} />}

@@ -11,7 +11,8 @@ Alongside the snapshot, the builder records:
 - ``site_layer``: the site's own values, so a draft can be discarded by
   restoring them.
 - ``sources``: the parent layers the snapshot was built from, each with
-  a hash, so the admin UI can tell when a parent has changed since.
+  its values and a hash, so the admin UI can tell when a parent has
+  changed since and say where an inherited value came from.
 - ``content_hash``: a hash of the snapshot, used to tell whether the
   current draft differs from a revision.
 """
@@ -122,6 +123,7 @@ async def build_site_snapshot(db: AsyncSession, site_id: uuid.UUID) -> SiteSnaps
             "kind": "organisation_config",
             "id": str(site.organisation_id),
             "content_hash": content_hash(org_defaults or {}),
+            "values": org_defaults or {},
         }
     ]
     if group_id:
@@ -130,6 +132,7 @@ async def build_site_snapshot(db: AsyncSession, site_id: uuid.UUID) -> SiteSnaps
                 "kind": "site_group_config",
                 "id": str(group_id),
                 "content_hash": content_hash(group_defaults or {}),
+                "values": group_defaults or {},
             }
         )
 

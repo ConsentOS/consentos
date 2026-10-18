@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import LiveRevisionCard from '../components/LiveRevisionCard';
@@ -16,6 +16,7 @@ import type {
 const mockListRevisions = vi.fn<(siteId: string, params: unknown) => Promise<RevisionList>>();
 const mockGetDraftStatus = vi.fn<(siteId: string) => Promise<DraftStatus>>();
 const mockGetRevision = vi.fn<(siteId: string, revisionId: string) => Promise<RevisionDetail>>();
+const mockGetDiff = vi.fn();
 const mockRollback =
   vi.fn<(siteId: string, revisionId: string, askAgain: boolean) => Promise<RevisionSummary>>();
 
@@ -28,6 +29,7 @@ vi.mock('../api/revisions', async () => {
     getRevision: (siteId: string, revisionId: string) => mockGetRevision(siteId, revisionId),
     rollbackToRevision: (siteId: string, revisionId: string, askAgain: boolean) =>
       mockRollback(siteId, revisionId, askAgain),
+    getDiff: (siteId: string, params: unknown) => mockGetDiff(siteId, params),
   };
 });
 
@@ -76,8 +78,9 @@ describe('SiteHistoryTab', () => {
     });
     renderWithQuery(<SiteHistoryTab siteId="site-1" />);
 
-    expect(await screen.findByText('v2')).toBeInTheDocument();
-    expect(screen.getByText('v1')).toBeInTheDocument();
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('v2')).toBeInTheDocument();
+    expect(within(table).getByText('v1')).toBeInTheDocument();
     expect(screen.getAllByText('Live')).toHaveLength(1);
     expect(screen.getByText('Asked visitors again')).toBeInTheDocument();
     expect(screen.getByText('Launch')).toBeInTheDocument();
@@ -196,6 +199,40 @@ describe('Rolling back', () => {
     fireEvent.click(confirm);
 
     expect(await screen.findByText('That revision is already live')).toBeInTheDocument();
+  });
+});
+
+describe('Comparing revisions', () => {
+  beforeEach(() => {
+    signInAs('viewer');
+    mockGetDiff.mockReset().mockResolvedValue({
+      from: { revision_id: 'rev-1', number: 1, content_hash: 'a' },
+      to: { revision_id: 'rev-2', number: 2, content_hash: 'b' },
+      changes: [
+        { area: 'settings', key: 'terms_url', before: null, after: 'https://t', source: 'site' },
+      ],
+      reconsent_reasons: [],
+    });
+    mockListRevisions.mockReset().mockResolvedValue({
+      total: 2,
+      items: [revision({ id: 'rev-2', number: 2, is_live: true }), revision()],
+    });
+  });
+
+  it('shows the differences between two revisions', async () => {
+    renderWithQuery(<SiteHistoryTab siteId="site-1" />);
+
+    const compare = await screen.findByRole('button', { name: 'Compare' });
+    expect(compare).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Compare from'), { target: { value: 'rev-1' } });
+    fireEvent.change(screen.getByLabelText('Compare to'), { target: { value: 'rev-2' } });
+    fireEvent.click(compare);
+
+    expect(await screen.findByText('Terms link')).toBeInTheDocument();
+    expect(mockGetDiff).toHaveBeenCalledWith('site-1', {
+      from_revision: 'rev-1',
+      to_revision: 'rev-2',
+    });
   });
 });
 

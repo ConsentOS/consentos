@@ -3,6 +3,8 @@ import { useState } from 'react';
 
 import { listRevisions } from '../api/revisions';
 import { useAuthStore } from '../stores/auth';
+import CompareRevisionsDialog from './CompareRevisionsDialog';
+import { canPublish } from './permissions';
 import RollbackDialog from './RollbackDialog';
 import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
@@ -10,6 +12,7 @@ import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { EmptyState } from './ui/empty-state';
 import { LoadingState } from './ui/loading-state';
+import { Select } from './ui/select';
 import type { RevisionListItem } from '../types/api';
 
 const PAGE_SIZE = 25;
@@ -21,8 +24,11 @@ interface Props {
 export default function SiteHistoryTab({ siteId }: Props) {
   const [page, setPage] = useState(0);
   const [rollingBack, setRollingBack] = useState<RevisionListItem | null>(null);
+  const [compareFrom, setCompareFrom] = useState('');
+  const [compareTo, setCompareTo] = useState('');
+  const [comparing, setComparing] = useState(false);
   const { user } = useAuthStore();
-  const canRollback = user?.role === 'owner' || user?.role === 'admin';
+  const canRollback = canPublish(user);
   const { data, isLoading, isError } = useQuery({
     queryKey: ['sites', siteId, 'revisions', page],
     queryFn: () => listRevisions(siteId, { limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
@@ -35,10 +41,51 @@ export default function SiteHistoryTab({ siteId }: Props) {
   }
 
   const pageCount = Math.ceil(data.total / PAGE_SIZE);
+  const fromRevision = data.items.find((revision) => revision.id === compareFrom);
+  const toRevision = data.items.find((revision) => revision.id === compareTo);
 
   return (
     <Card className="p-6">
       <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">Publish history</h3>
+      {data.items.length > 1 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-text-secondary">Compare</span>
+          <Select
+            aria-label="Compare from"
+            value={compareFrom}
+            onChange={(e) => setCompareFrom(e.target.value)}
+            className="h-auto w-auto px-2 py-1 text-xs"
+          >
+            <option value="">From…</option>
+            {data.items.map((revision) => (
+              <option key={revision.id} value={revision.id}>
+                v{revision.number}
+              </option>
+            ))}
+          </Select>
+          <Select
+            aria-label="Compare to"
+            value={compareTo}
+            onChange={(e) => setCompareTo(e.target.value)}
+            className="h-auto w-auto px-2 py-1 text-xs"
+          >
+            <option value="">To…</option>
+            {data.items.map((revision) => (
+              <option key={revision.id} value={revision.id}>
+                v{revision.number}
+              </option>
+            ))}
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!fromRevision || !toRevision || compareFrom === compareTo}
+            onClick={() => setComparing(true)}
+          >
+            Compare
+          </Button>
+        </div>
+      )}
       <table className="w-full text-left text-sm">
         <thead className="text-xs text-text-secondary">
           <tr>
@@ -109,6 +156,14 @@ export default function SiteHistoryTab({ siteId }: Props) {
             </Button>
           </div>
         </div>
+      )}
+      {comparing && fromRevision && toRevision && (
+        <CompareRevisionsDialog
+          siteId={siteId}
+          from={fromRevision}
+          to={toRevision}
+          onClose={() => setComparing(false)}
+        />
       )}
       {rollingBack && (
         <RollbackDialog
