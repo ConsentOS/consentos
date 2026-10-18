@@ -6,7 +6,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.site import Site
-from src.routers.config import _get_site_group_id
+from src.services.config_layers import get_site_group_id
 from tests.conftest import create_test_site, requires_db
 
 
@@ -117,7 +117,7 @@ class TestSiteGroupLookup:
             headers=auth_headers,
         )
         async with AsyncSession(_test_engine) as session:
-            assert await _get_site_group_id(uuid.UUID(site_id), session) == uuid.UUID(group_id)
+            assert await get_site_group_id(uuid.UUID(site_id), session) == uuid.UUID(group_id)
 
     async def test_ignores_mismatched_group(
         self, db_client, auth_headers, other_org_headers, _test_engine
@@ -131,12 +131,12 @@ class TestSiteGroupLookup:
                 .values(site_group_id=uuid.UUID(other_group_id))
             )
             await session.commit()
-            assert await _get_site_group_id(uuid.UUID(site_id), session) is None
+            assert await get_site_group_id(uuid.UUID(site_id), session) is None
 
     async def test_returns_none_without_group(self, db_client, auth_headers, _test_engine):
         site_id = await create_test_site(db_client, auth_headers)
         async with AsyncSession(_test_engine) as session:
-            assert await _get_site_group_id(uuid.UUID(site_id), session) is None
+            assert await get_site_group_id(uuid.UUID(site_id), session) is None
 
 
 @requires_db

@@ -98,20 +98,40 @@ def resolve_config(
     # Apply site-specific config
     _merge_non_none(resolved, site_config)
 
-    # Apply regional blocking mode override
-    if region and site_config.get("regional_modes"):
-        regional_modes = site_config["regional_modes"]
-        if isinstance(regional_modes, dict):
-            # Try exact match first, then fall back to DEFAULT
-            regional_mode = regional_modes.get(region) or regional_modes.get("DEFAULT")
-            if regional_mode:
-                resolved["blocking_mode"] = regional_mode
+    if region:
+        resolved = apply_region(resolved, region)
 
     resolved["enabled_categories"] = _normalise_enabled_categories(
         resolved.get("enabled_categories")
     )
 
     return resolved
+
+
+def apply_region(resolved: dict[str, Any], region: str) -> dict[str, Any]:
+    """Return a copy of ``resolved`` with the regional blocking mode applied.
+
+    ``regional_modes`` comes from the merged cascade, so a mapping set at
+    organisation or site group level applies when the site has none of
+    its own. An exact region match wins, then ``DEFAULT``.
+    """
+    regional_modes = resolved.get("regional_modes")
+    if not isinstance(regional_modes, dict):
+        return resolved
+    regional_mode = regional_modes.get(region) or regional_modes.get("DEFAULT")
+    if not regional_mode:
+        return resolved
+    return {**resolved, "blocking_mode": regional_mode}
+
+
+def apply_consent_group(resolved: dict[str, Any], group_id: Any) -> None:
+    """Set ``consent_group_id`` when the site's group shares consent.
+
+    The banner treats a non-null ``consent_group_id`` as the signal to
+    start the cross-domain bridge.
+    """
+    if group_id and resolved.get("consent_sharing_enabled"):
+        resolved["consent_group_id"] = str(group_id)
 
 
 def _normalise_enabled_categories(value: Any) -> list[str]:
