@@ -27,6 +27,8 @@ export interface Site {
   display_name: string;
   is_active: boolean;
   site_group_id: string | null;
+  /** ``null`` until the site's first publish. */
+  live_revision_id: string | null;
   created_at: string;
   updated_at: string;
 }

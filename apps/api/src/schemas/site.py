@@ -39,6 +39,8 @@ class SiteResponse(BaseModel):
     is_active: bool
     additional_domains: list[str] | None = None
     site_group_id: uuid.UUID | None = None
+    # ``None`` until the site's first publish.
+    live_revision_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 

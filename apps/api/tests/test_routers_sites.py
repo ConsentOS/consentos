@@ -30,6 +30,7 @@ def _mock_site(**overrides):
     site.is_active = overrides.get("is_active", True)
     site.additional_domains = overrides.get("additional_domains")
     site.site_group_id = overrides.get("site_group_id")
+    site.live_revision_id = overrides.get("live_revision_id")
     site.deleted_at = None
     site.created_at = datetime.now(UTC)
     site.updated_at = datetime.now(UTC)
