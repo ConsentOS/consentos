@@ -6,8 +6,9 @@ Create Date: 2026-10-18
 
 Immutable published snapshots of each site's config. A trigger rejects
 changes to a revision's recorded content. ``sites.live_revision_id``
-points at the revision the banner serves, and ``publish_attempts``
-records every publish and rollback, including failures.
+points at the revision the banner serves, ``publish_attempts`` records
+every publish and rollback, including failures, and consent records
+note the revision the visitor consented against.
 
 Every existing site with a config gets v1, built from its current
 effective config, so it keeps serving exactly what it served before.
@@ -161,10 +162,37 @@ def upgrade() -> None:
     op.create_index(
         "ix_publish_attempts_site_attempted", "publish_attempts", ["site_id", "attempted_at"]
     )
+    op.add_column(
+        "consent_records",
+        sa.Column("config_revision_id", postgresql.UUID(as_uuid=True), nullable=True),
+    )
+    op.add_column(
+        "consent_records",
+        sa.Column("consent_version", postgresql.UUID(as_uuid=True), nullable=True),
+    )
+    op.create_index(
+        "ix_consent_records_config_revision_id", "consent_records", ["config_revision_id"]
+    )
+    # Added unvalidated, then validated, so the check of existing rows
+    # (all empty) doesn't hold the stronger lock while it runs.
+    op.execute(
+        "ALTER TABLE consent_records ADD CONSTRAINT fk_consent_records_config_revision_id "
+        "FOREIGN KEY (config_revision_id) REFERENCES site_config_revisions (id) "
+        "ON DELETE SET NULL NOT VALID"
+    )
+    op.execute(
+        "ALTER TABLE consent_records VALIDATE CONSTRAINT fk_consent_records_config_revision_id"
+    )
     backfill_initial_revisions(op.get_bind())
 
 
 def downgrade() -> None:
+    op.drop_constraint(
+        "fk_consent_records_config_revision_id", "consent_records", type_="foreignkey"
+    )
+    op.drop_index("ix_consent_records_config_revision_id", table_name="consent_records")
+    op.drop_column("consent_records", "consent_version")
+    op.drop_column("consent_records", "config_revision_id")
     op.drop_index("ix_publish_attempts_site_attempted", table_name="publish_attempts")
     op.drop_table("publish_attempts")
     op.drop_constraint("fk_sites_live_revision_id", "sites", type_="foreignkey")

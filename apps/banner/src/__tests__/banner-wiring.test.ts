@@ -115,6 +115,18 @@ describe('banner wiring', () => {
     expect((body.gpp_string as string).length).toBeGreaterThan(0);
   });
 
+  it('records the revision the visitor consented against', async () => {
+    await boot({ revision_id: 'rev-9' });
+    click('accept');
+    expect(consentPost()).toMatchObject({ config_revision_id: 'rev-9' });
+  });
+
+  it('sends no revision when the config has none', async () => {
+    await boot({ revision_id: undefined });
+    click('accept');
+    expect(consentPost()).toMatchObject({ config_revision_id: null });
+  });
+
   it('sends no GPP string when GPP is off', async () => {
     await boot({});
     click('accept');

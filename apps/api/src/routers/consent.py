@@ -8,6 +8,7 @@ from src.db import get_db
 from src.extensions.registry import get_registry
 from src.models.consent import ConsentRecord
 from src.models.site import Site
+from src.models.site_config_revision import SiteConfigRevision
 from src.schemas.auth import CurrentUser
 from src.schemas.consent import (
     ConsentRecordCreate,
@@ -28,7 +29,7 @@ async def record_consent(
     body: ConsentRecordCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-) -> ConsentRecord:
+) -> ConsentRecordResponse:
     """Record a consent event from the banner. Public endpoint (no auth required).
 
     The site must exist and be active. When the request carries a usable
@@ -36,6 +37,7 @@ async def record_consent(
     """
     site = await _load_active_site(body.site_id, db)
     require_request_from_site(request, site)
+    revision = await _site_revision(body.config_revision_id, site.id, db)
 
     # Pseudonymise IP and user agent with HMAC so the resulting values
     # cannot be reversed without the server-side secret.
@@ -58,6 +60,8 @@ async def record_consent(
         page_url=body.page_url,
         country_code=body.country_code,
         region_code=body.region_code,
+        config_revision_id=revision.id if revision else None,
+        consent_version=revision.consent_version if revision else None,
     )
     db.add(record)
     await db.flush()
@@ -67,7 +71,27 @@ async def record_consent(
     for hook in get_registry().consent_record_hooks:
         await hook(db, record)
 
-    return record
+    return _response(record, revision.number if revision else None)
+
+
+async def _site_revision(
+    revision_id: uuid.UUID | None, site_id: uuid.UUID, db: AsyncSession
+) -> SiteConfigRevision | None:
+    """The named revision if it is one of the site's, otherwise ``None``.
+
+    The banner supplies the id, so one that doesn't belong to the site is
+    dropped rather than recorded as proof of what the visitor saw.
+    """
+    if revision_id is None:
+        return None
+    revision = await db.get(SiteConfigRevision, revision_id)
+    return revision if revision is not None and revision.site_id == site_id else None
+
+
+def _response(record: ConsentRecord, revision_number: int | None) -> ConsentRecordResponse:
+    response = ConsentRecordResponse.model_validate(record)
+    response.config_revision_number = revision_number
+    return response
 
 
 async def _load_active_site(site_id: uuid.UUID, db: AsyncSession) -> Site:
@@ -141,7 +165,11 @@ async def list_consent_records(
     if site is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
 
-    base = select(ConsentRecord).where(ConsentRecord.site_id == site_id)
+    base = (
+        select(ConsentRecord, SiteConfigRevision.number)
+        .outerjoin(SiteConfigRevision, SiteConfigRevision.id == ConsentRecord.config_revision_id)
+        .where(ConsentRecord.site_id == site_id)
+    )
     count_base = (
         select(func.count()).select_from(ConsentRecord).where(ConsentRecord.site_id == site_id)
     )
@@ -151,20 +179,16 @@ async def list_consent_records(
         count_base = count_base.where(ConsentRecord.visitor_id == visitor_id)
 
     total = await db.scalar(count_base) or 0
-    items = (
-        (
-            await db.execute(
-                base.order_by(ConsentRecord.consented_at.desc())
-                .offset((page - 1) * page_size)
-                .limit(page_size)
-            )
+    rows = (
+        await db.execute(
+            base.order_by(ConsentRecord.consented_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
         )
-        .scalars()
-        .all()
-    )
+    ).all()
 
     return {
-        "items": list(items),
+        "items": [_response(record, number) for record, number in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -176,14 +200,16 @@ async def get_consent(
     consent_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor", "viewer")),
     db: AsyncSession = Depends(get_db),
-) -> ConsentRecord:
+) -> ConsentRecordResponse:
     """Retrieve a consent record by ID.
 
     Requires authentication and tenant membership. Consent records
     contain PII-adjacent data (hashed IP, page URL, category decisions)
     and must not be readable by anyone holding a record UUID.
     """
-    return await _load_record_for_org(consent_id, current_user, db)
+    record = await _load_record_for_org(consent_id, current_user, db)
+    revision = await _site_revision(record.config_revision_id, record.site_id, db)
+    return _response(record, revision.number if revision else None)
 
 
 @router.get("/verify/{consent_id}", response_model=ConsentVerifyResponse)

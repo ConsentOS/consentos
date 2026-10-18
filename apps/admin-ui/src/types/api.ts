@@ -395,6 +395,10 @@ export interface ConsentRecord {
   page_url: string | null;
   country_code: string | null;
   region_code: string | null;
+  /** The published revision the visitor consented against, if recorded. */
+  config_revision_id: string | null;
+  consent_version: string | null;
+  config_revision_number: number | null;
   consented_at: string;
 }
 
