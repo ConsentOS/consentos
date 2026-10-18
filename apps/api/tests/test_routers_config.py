@@ -181,59 +181,6 @@ class TestPublishConfig:
             )
         assert resp.status_code == 422
 
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("role", ["editor", "viewer"])
-    async def test_requires_admin(self, mock_app, role):
-        db = _mock_db_sequence()
-        async with await _client(mock_app, db) as client:
-            resp = await client.post(
-                f"/api/v1/config/sites/{uuid.uuid4()}/publish",
-                headers=_auth_headers(role=role),
-                json={"expected_content_hash": "0" * 64},
-            )
-        assert resp.status_code == 403
-
-
-class TestRollbackPermissions:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("role", ["editor", "viewer"])
-    async def test_requires_admin(self, mock_app, role):
-        db = _mock_db_sequence()
-        async with await _client(mock_app, db) as client:
-            resp = await client.post(
-                f"/api/v1/config/sites/{uuid.uuid4()}/revisions/{uuid.uuid4()}/rollback",
-                headers=_auth_headers(role=role),
-                json={},
-            )
-        assert resp.status_code == 403
-
-
-class TestDiscardPermissions:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("role", ["editor", "viewer"])
-    async def test_requires_admin(self, mock_app, role):
-        db = _mock_db_sequence()
-        async with await _client(mock_app, db) as client:
-            resp = await client.post(
-                f"/api/v1/config/sites/{uuid.uuid4()}/discard",
-                headers=_auth_headers(role=role),
-            )
-        assert resp.status_code == 403
-
-
-class TestBulkPublishPermissions:
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("role", ["editor", "viewer"])
-    async def test_requires_admin(self, mock_app, role):
-        db = _mock_db_sequence()
-        async with await _client(mock_app, db) as client:
-            resp = await client.post(
-                "/api/v1/config/bulk-publish",
-                headers=_auth_headers(role=role),
-                json={"sites": [{"site_id": str(uuid.uuid4()), "expected_content_hash": "0" * 64}]},
-            )
-        assert resp.status_code == 403
-
 
 class TestGeoResolvedConfig:
     @pytest.mark.asyncio

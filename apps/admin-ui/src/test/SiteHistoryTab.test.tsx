@@ -24,6 +24,7 @@ vi.mock('../api/revisions', async () => {
   const actual = await vi.importActual<typeof import('../api/revisions')>('../api/revisions');
   return {
     apiErrorMessage: actual.apiErrorMessage,
+    publishErrorMessage: actual.publishErrorMessage,
     listRevisions: (siteId: string, params: unknown) => mockListRevisions(siteId, params),
     getDraftStatus: (siteId: string) => mockGetDraftStatus(siteId),
     getRevision: (siteId: string, revisionId: string) => mockGetRevision(siteId, revisionId),
@@ -186,6 +187,19 @@ describe('Rolling back', () => {
     expect(screen.getByRole('checkbox')).not.toBeChecked();
     fireEvent.click(confirm);
     await waitFor(() => expect(mockRollback).toHaveBeenCalledWith('site-1', 'rev-1', false));
+  });
+
+  it('explains a refusal for lack of permission', async () => {
+    mockGetRevision.mockResolvedValue(detail([]));
+    mockRollback.mockRejectedValue({ response: { status: 403, data: { detail: "Role 'editor' is not permitted for this action" } } });
+    renderWithQuery(<SiteHistoryTab siteId="site-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Roll back' }));
+    const confirm = await screen.findByRole('button', { name: 'Roll back to v1' });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    fireEvent.click(confirm);
+
+    expect(await screen.findByText('Only owners and admins can publish, roll back or discard changes.')).toBeInTheDocument();
   });
 
   it('shows why a rollback failed', async () => {

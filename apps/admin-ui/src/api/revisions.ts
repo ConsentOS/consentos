@@ -88,3 +88,15 @@ export function apiErrorMessage(error: unknown, fallback: string): string {
   const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
   return typeof detail === 'string' ? detail : fallback;
 }
+
+/**
+ * Like ``apiErrorMessage``, but a refusal for lack of permission gets a
+ * clear explanation instead of the API's role check wording.
+ */
+export function publishErrorMessage(error: unknown, fallback: string): string {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status === 403) {
+    return 'Only owners and admins can publish, roll back or discard changes.';
+  }
+  return apiErrorMessage(error, fallback);
+}

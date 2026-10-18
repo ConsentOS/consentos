@@ -18,6 +18,7 @@ vi.mock('../api/revisions', async () => {
   const actual = await vi.importActual<typeof import('../api/revisions')>('../api/revisions');
   return {
     apiErrorMessage: actual.apiErrorMessage,
+    publishErrorMessage: actual.publishErrorMessage,
     getDraftStatus: (siteId: string) => mockGetDraftStatus(siteId),
     getDiff: (siteId: string, params?: unknown) => mockGetDiff(siteId, params),
     publishDraft: (...args: unknown[]) => mockPublish(...args),
@@ -110,6 +111,17 @@ describe('Discarding', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard changes' }));
 
     expect(await screen.findByText('Site not found')).toBeInTheDocument();
+  });
+
+  it('explains a refusal for lack of permission', async () => {
+    mockGetDraftStatus.mockResolvedValue(draft());
+    mockDiscard.mockRejectedValue({ response: { status: 403, data: { detail: "Role 'editor' is not permitted for this action" } } });
+    renderWithQuery(<UnpublishedChangesBar siteId="site-1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard changes' }));
+
+    expect(await screen.findByText('Only owners and admins can publish, roll back or discard changes.')).toBeInTheDocument();
   });
 
   it('is not offered to editors or before the first publish', async () => {
@@ -229,6 +241,17 @@ describe('PublishDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review the latest changes' }));
     await waitFor(() => expect(mockGetDiff).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Publish' })).toBeEnabled());
+  });
+
+  it('explains a refusal for lack of permission', async () => {
+    mockGetDiff.mockResolvedValue(diff());
+    mockPublish.mockRejectedValue({ response: { status: 403, data: { detail: "Role 'editor' is not permitted for this action" } } });
+    renderWithQuery(<PublishDialog siteId="site-1" onClose={() => {}} />);
+
+    await screen.findByText('Terms link');
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+
+    expect(await screen.findByText('Only owners and admins can publish, roll back or discard changes.')).toBeInTheDocument();
   });
 
   it('lets editors review but not publish', async () => {
