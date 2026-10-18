@@ -179,6 +179,79 @@ class TestReconsent:
 
 
 @requires_db
+class TestHistory:
+    async def test_lists_revisions_newest_first(self, db_client, auth_headers, test_user):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id, note="Launch")
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/t")
+        second = await _publish_draft(db_client, auth_headers, site_id, ask_again=True)
+
+        resp = await db_client.get(
+            f"/api/v1/config/sites/{site_id}/revisions", headers=auth_headers
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 2
+        newest, oldest = body["items"]
+        assert (newest["id"], newest["number"], newest["is_live"]) == (second["id"], 2, True)
+        assert newest["requires_reconsent"] is True
+        assert (oldest["id"], oldest["is_live"], oldest["note"]) == (first["id"], False, "Launch")
+        assert oldest["published_by_name"] == test_user.full_name
+        assert oldest["rolled_back_from_id"] is None
+
+    async def test_pages(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/t")
+        await _publish_draft(db_client, auth_headers, site_id)
+
+        resp = await db_client.get(
+            f"/api/v1/config/sites/{site_id}/revisions",
+            params={"limit": 1, "offset": 1},
+            headers=auth_headers,
+        )
+        body = resp.json()
+        assert body["total"] == 2
+        assert [item["number"] for item in body["items"]] == [1]
+
+    async def test_revision_detail(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        published = await _publish_draft(db_client, auth_headers, site_id)
+
+        resp = await db_client.get(
+            f"/api/v1/config/sites/{site_id}/revisions/{published['id']}", headers=auth_headers
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["is_live"] is True
+        assert body["snapshot"]["config"]["blocking_mode"] == "opt_in"
+        assert body["sources"][0]["kind"] == "organisation_config"
+
+    async def test_revision_of_another_site_is_not_found(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        other_site = await create_test_site(db_client, auth_headers)
+        published = await _publish_draft(db_client, auth_headers, other_site)
+
+        resp = await db_client.get(
+            f"/api/v1/config/sites/{site_id}/revisions/{published['id']}", headers=auth_headers
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE"])
+    async def test_revisions_cannot_be_changed(self, db_client, auth_headers, method):
+        site_id = await create_test_site(db_client, auth_headers)
+        published = await _publish_draft(db_client, auth_headers, site_id)
+
+        resp = await db_client.request(
+            method,
+            f"/api/v1/config/sites/{site_id}/revisions/{published['id']}",
+            headers=auth_headers,
+            json={"note": "edited"},
+        )
+        assert resp.status_code == 405
+
+
+@requires_db
 class TestOrgScoping:
     async def test_other_org_cannot_see_or_publish(
         self, db_client, auth_headers, other_org_headers
@@ -191,6 +264,10 @@ class TestOrgScoping:
         )
         assert resp.status_code == 404
         resp = await _publish(db_client, other_org_headers, site_id, draft["content_hash"])
+        assert resp.status_code == 404
+        resp = await db_client.get(
+            f"/api/v1/config/sites/{site_id}/revisions", headers=other_org_headers
+        )
         assert resp.status_code == 404
 
 

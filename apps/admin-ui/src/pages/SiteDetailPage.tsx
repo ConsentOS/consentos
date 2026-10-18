@@ -9,6 +9,7 @@ import SiteCookiesTab from '../components/SiteCookiesTab';
 import SiteOverviewTab from '../components/SiteOverviewTab';
 import BannerBuilderTab from '../components/BannerBuilderTab';
 import SiteScannerTab from '../components/SiteScannerTab';
+import SiteHistoryTab from '../components/SiteHistoryTab';
 import SiteTranslationsTab from '../components/SiteTranslationsTab';
 import { LoadingState } from '../components/ui/loading-state.tsx';
 import { getSiteDetailTabs } from '../extensions/registry';
@@ -21,6 +22,7 @@ const CORE_TABS: { id: string; label: string; order: number }[] = [
   { id: 'banner', label: 'Banner', order: 40 },
   { id: 'translations', label: 'Translations', order: 50 },
   { id: 'scanner', label: 'Scans', order: 60 },
+  { id: 'history', label: 'History', order: 70 },
 ];
 
 export default function SiteDetailPage() {
@@ -112,6 +114,7 @@ export default function SiteDetailPage() {
       )}
       {activeTab === 'translations' && siteId && <SiteTranslationsTab siteId={siteId} />}
       {activeTab === 'scanner' && siteId && <SiteScannerTab siteId={siteId} />}
+      {activeTab === 'history' && siteId && <SiteHistoryTab siteId={siteId} />}
       {/* Extension tabs */}
       {extensionTabs.map(
         (ext) =>

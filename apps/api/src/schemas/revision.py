@@ -26,6 +26,23 @@ class RevisionSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class RevisionListItem(RevisionSummary):
+    is_live: bool
+    published_by_name: str | None
+    rolled_back_from_id: uuid.UUID | None
+    rolled_back_from_number: int | None
+
+
+class RevisionList(BaseModel):
+    items: list[RevisionListItem]
+    total: int
+
+
+class RevisionDetail(RevisionListItem):
+    snapshot: dict
+    sources: list[dict]
+
+
 class ChangedSource(BaseModel):
     kind: str
     id: str

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { deleteSite } from '../api/sites';
+import LiveRevisionCard from './LiveRevisionCard';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { MetricCard } from './ui/metric-card';
@@ -55,6 +56,8 @@ export default function SiteOverviewTab({ site, config }: Props) {
           value={`${config?.consent_expiry_days ?? 365} days`}
         />
       </div>
+
+      <LiveRevisionCard siteId={site.id} />
 
       {/* Integration snippet */}
       <Card className="p-6">
