@@ -480,6 +480,28 @@ class TestCrawlSite:
         assert len(result.pages) == 3
 
     @pytest.mark.asyncio(loop_scope="session")
+    @patch("src.crawler.async_playwright")
+    async def test_reports_progress_after_each_page(self, mock_pw):
+        page = _make_mock_page()
+        context = _make_mock_context(page)
+        browser = _make_mock_browser(context)
+
+        pw_instance = AsyncMock()
+        pw_instance.chromium.launch = AsyncMock(return_value=browser)
+        mock_pw.return_value.__aenter__ = AsyncMock(return_value=pw_instance)
+        mock_pw.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        seen: list[tuple[int, int]] = []
+
+        async def on_page(partial, pages_total):
+            seen.append((len(partial.pages), pages_total))
+
+        urls = [f"https://example.com/page{i}" for i in range(5)]
+        await CookieCrawler().crawl_site(urls, max_pages=3, on_page=on_page)
+
+        assert seen == [(1, 3), (2, 3), (3, 3)]
+
+    @pytest.mark.asyncio(loop_scope="session")
     async def test_empty_urls(self):
         crawler = CookieCrawler()
         result = await crawler.crawl_site([])

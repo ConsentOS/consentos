@@ -1,20 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 
-import { getScan, getScanDiff, listScans, triggerScan } from '../api/scanner';
+import { getScan, getScanDiff, triggerScan } from '../api/scanner';
 import { getSiteConfig, updateSiteConfig } from '../api/sites';
+import { isScanActive, useSiteScans } from '../hooks/useSiteScans';
 import { trackFeatureUsage } from '../services/analytics';
 import type { CookieDiffItem, ScanDiff, ScanJob, ScanJobDetail, ScanResult, SiteConfig } from '../types/api';
 import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
+import ScanProgress from './ScanProgress';
 import { LoadingState } from './ui/loading-state';
 import { Select } from './ui/select';
 
 interface Props {
   siteId: string;
 }
+
+const TRIGGER_LABELS: Record<ScanJob['trigger'], string> = {
+  manual: 'Manual',
+  initial: 'First scan',
+  scheduled: 'Scheduled',
+  client_report: 'Visitor report',
+};
 
 const SCHEDULE_OPTIONS: { value: string; label: string; cron: string | null }[] = [
   { value: 'disabled', label: 'Disabled', cron: null },
@@ -239,10 +248,8 @@ export default function SiteScannerTab({ siteId }: Props) {
     scheduleMutation.mutate(trimmed || null);
   };
 
-  const { data: scans, isLoading } = useQuery<ScanJob[]>({
-    queryKey: ['scans', siteId],
-    queryFn: () => listScans(siteId),
-  });
+  const { data: scans, isLoading } = useSiteScans(siteId);
+  const activeScan = scans?.find(isScanActive);
 
   const triggerMutation = useMutation({
     mutationFn: () => triggerScan(siteId),
@@ -321,11 +328,17 @@ export default function SiteScannerTab({ siteId }: Props) {
         <h2 className="font-heading text-lg font-semibold text-foreground">Cookie Scans</h2>
         <Button
           onClick={() => triggerMutation.mutate()}
-          disabled={triggerMutation.isPending}
+          disabled={triggerMutation.isPending || activeScan !== undefined}
         >
           {triggerMutation.isPending ? 'Triggering...' : 'Trigger Scan'}
         </Button>
       </div>
+
+      {activeScan && (
+        <Card className="mb-4 p-4">
+          <ScanProgress scan={activeScan} />
+        </Card>
+      )}
 
       {triggerMutation.isError && (
         <Alert variant="error" className="mb-4">
@@ -357,7 +370,7 @@ export default function SiteScannerTab({ siteId }: Props) {
                 <Fragment key={scan.id}>
                   <tr className="hover:bg-mist">
                     <td className="px-4 py-3"><Badge variant={statusVariant(scan.status)}>{scan.status}</Badge></td>
-                    <td className="px-4 py-3 text-text-secondary">{scan.trigger}</td>
+                    <td className="px-4 py-3 text-text-secondary">{TRIGGER_LABELS[scan.trigger]}</td>
                     <td className="px-4 py-3 text-text-secondary">
                       {scan.pages_scanned}{scan.pages_total ? ` / ${scan.pages_total}` : ''}
                     </td>

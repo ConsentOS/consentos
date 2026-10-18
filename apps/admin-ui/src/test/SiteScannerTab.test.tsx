@@ -123,7 +123,7 @@ describe('SiteScannerTab', () => {
 
     await waitFor(() => {
       expect(screen.getByText('completed')).toBeInTheDocument();
-      expect(screen.getByText('manual')).toBeInTheDocument();
+      expect(screen.getByText('Manual')).toBeInTheDocument();
     });
   });
 
@@ -189,5 +189,26 @@ describe('SiteScannerTab', () => {
     await waitFor(() => {
       expect(screen.getByText('No initiator chains detected in this scan.')).toBeInTheDocument();
     });
+  });
+
+  it('shows a running scan\'s progress and disables triggering another', async () => {
+    mockListScans.mockResolvedValue([
+      {
+        ...TEST_SCAN,
+        status: 'running',
+        trigger: 'initial',
+        pages_scanned: 2,
+        pages_total: 8,
+        cookies_found: 1,
+        completed_at: null,
+      },
+    ]);
+    renderTab();
+
+    await waitFor(() => {
+      expect(screen.getByText('2 of 8 pages scanned, 1 cookie found so far')).toBeInTheDocument();
+    });
+    expect(screen.getByText('First scan')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Trigger Scan' })).toBeDisabled();
   });
 });

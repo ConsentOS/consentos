@@ -93,6 +93,10 @@ export default function CreateSiteModal({ onClose, defaultGroupId }: Props) {
           </Select>
         </FormField>
 
+        <p className="text-xs text-text-secondary">
+          We'll start scanning your site for cookies as soon as it's added.
+        </p>
+
         <div className="flex justify-end gap-3 pt-2">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel

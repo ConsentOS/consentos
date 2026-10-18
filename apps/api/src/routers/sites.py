@@ -10,6 +10,7 @@ from src.models.site import Site
 from src.models.site_config import SiteConfig
 from src.models.site_group import SiteGroup
 from src.schemas.auth import CurrentUser
+from src.schemas.scanner import ScanTrigger
 from src.schemas.site import (
     SiteConfigCreate,
     SiteConfigResponse,
@@ -21,6 +22,12 @@ from src.schemas.site import (
 from src.services.config_layers import get_site_group_id, load_group_defaults, load_org_defaults
 from src.services.config_resolver import orm_to_config_dict, resolve_config
 from src.services.dependencies import require_role
+from src.services.scanner import (
+    ScanDispatchError,
+    complete_scan_job,
+    configured_max_pages,
+    start_scan,
+)
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
@@ -66,8 +73,29 @@ async def create_site(
     db.add(default_config)
     await db.flush()
 
+    if body.start_scan:
+        await _start_first_scan(db, site.id)
+
     await db.refresh(site)
     return site
+
+
+async def _start_first_scan(db: AsyncSession, site_id: uuid.UUID) -> None:
+    """Start a new site's first scan, without failing site creation.
+
+    A job that can't be dispatched is marked failed, so the site shows a
+    failed scan the owner can retry rather than none at all.
+    """
+    try:
+        await start_scan(
+            db,
+            site_id=site_id,
+            trigger=ScanTrigger.INITIAL,
+            max_pages=await configured_max_pages(db, site_id),
+        )
+    except ScanDispatchError as exc:
+        await complete_scan_job(db, exc.job, error_message="The scanner couldn't be started")
+        await db.commit()
 
 
 @router.get("/", response_model=list[SiteResponse])
