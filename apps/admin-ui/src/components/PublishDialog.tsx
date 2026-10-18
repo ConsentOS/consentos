@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { apiErrorMessage, getDiff, publishDraft } from '../api/revisions';
+import { getDiff, publishDraft, publishErrorMessage } from '../api/revisions';
 import { useAuthStore } from '../stores/auth';
 import ConfigDiffView from './ConfigDiffView';
 import { canPublish } from './permissions';
@@ -110,7 +110,7 @@ export default function PublishDialog({ siteId, onClose }: Props) {
 
         {mutation.isError && (
           <Alert variant="error">
-            {apiErrorMessage(mutation.error, 'The publish failed. Nothing was changed.')}
+            {publishErrorMessage(mutation.error, 'The publish failed. Nothing was changed.')}
             {isStale && (
               <Button variant="link" size="sm" onClick={reviewAgain}>
                 Review the latest changes

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
-import { apiErrorMessage, discardDraft } from '../api/revisions';
+import { discardDraft, publishErrorMessage } from '../api/revisions';
 import { Alert } from './ui/alert';
 import { Button } from './ui/button';
 import { Modal } from './ui/modal';
@@ -37,7 +37,7 @@ export default function DiscardDialog({ siteId, liveNumber, onClose }: Props) {
         </p>
         {mutation.isError && (
           <Alert variant="error">
-            {apiErrorMessage(mutation.error, 'Nothing was discarded. Try again.')}
+            {publishErrorMessage(mutation.error, 'Nothing was discarded. Try again.')}
           </Alert>
         )}
         <div className="flex justify-end gap-2">

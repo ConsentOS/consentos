@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { apiErrorMessage, getRevision, rollbackToRevision } from '../api/revisions';
+import { getRevision, publishErrorMessage, rollbackToRevision } from '../api/revisions';
 import { describeReconsentReasons } from './reconsent';
 import { Alert } from './ui/alert';
 import { Button } from './ui/button';
@@ -62,7 +62,7 @@ export default function RollbackDialog({ siteId, revision, onClose }: Props) {
         </label>
         {mutation.isError && (
           <Alert variant="error">
-            {apiErrorMessage(mutation.error, 'The rollback failed. Nothing was changed.')}
+            {publishErrorMessage(mutation.error, 'The rollback failed. Nothing was changed.')}
           </Alert>
         )}
         <div className="flex justify-end gap-2">

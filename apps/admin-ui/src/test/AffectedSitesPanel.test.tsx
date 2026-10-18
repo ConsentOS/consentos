@@ -13,6 +13,7 @@ vi.mock('../api/revisions', async () => {
   const actual = await vi.importActual<typeof import('../api/revisions')>('../api/revisions');
   return {
     apiErrorMessage: actual.apiErrorMessage,
+    publishErrorMessage: actual.publishErrorMessage,
     listAffectedSites: (groupId?: string) => mockListAffected(groupId),
     bulkPublish: (body: unknown) => mockBulkPublish(body),
   };
@@ -129,6 +130,17 @@ describe('AffectedSitesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Publish 2 sites' }));
 
     expect(await screen.findByText('Nothing was published. Try again.')).toBeInTheDocument();
+  });
+
+  it('explains a refusal for lack of permission', async () => {
+    mockListAffected.mockResolvedValue(SITES);
+    mockBulkPublish.mockRejectedValue({ response: { status: 403, data: { detail: "Role 'editor' is not permitted for this action" } } });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Publish all affected sites' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Publish 2 sites' }));
+
+    expect(await screen.findByText('Only owners and admins can publish, roll back or discard changes.')).toBeInTheDocument();
   });
 
   it('tells editors who can publish', async () => {

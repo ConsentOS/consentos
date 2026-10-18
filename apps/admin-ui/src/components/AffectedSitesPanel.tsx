@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { apiErrorMessage, bulkPublish, listAffectedSites } from '../api/revisions';
+import { bulkPublish, listAffectedSites, publishErrorMessage } from '../api/revisions';
 import { useRefreshOnSave } from '../hooks/useRefreshOnSave';
 import { useAuthStore } from '../stores/auth';
 import { canPublish } from './permissions';
@@ -134,7 +134,7 @@ function BulkPublishDialog({ sites, onClose }: DialogProps) {
         )}
         {mutation.isError && (
           <Alert variant="error">
-            {apiErrorMessage(mutation.error, 'Nothing was published. Try again.')}
+            {publishErrorMessage(mutation.error, 'Nothing was published. Try again.')}
           </Alert>
         )}
         <div className="flex justify-end gap-2">
