@@ -4,6 +4,7 @@ import type { FormEvent } from 'react';
 
 import { getOrgConfig, updateOrgConfig } from '../api/org-config';
 import { trackConfigChange } from '../services/analytics';
+import AffectedSitesPanel from '../components/AffectedSitesPanel';
 import BannerBuilderTab from '../components/BannerBuilderTab';
 import { Alert } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
@@ -136,6 +137,8 @@ export default function SettingsPage() {
           override these values.
         </p>
       </div>
+
+      <AffectedSitesPanel />
 
       {/* Tabs */}
       <div className="flex gap-8 overflow-x-auto border-b border-border-subtle">

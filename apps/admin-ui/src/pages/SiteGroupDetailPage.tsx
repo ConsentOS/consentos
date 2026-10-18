@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 
 import { getSiteGroup } from '../api/site-groups';
 import { getSiteGroupConfig, updateSiteGroupConfig } from '../api/site-group-config';
+import AffectedSitesPanel from '../components/AffectedSitesPanel';
 import BannerBuilderTab from '../components/BannerBuilderTab';
 import { Alert } from '../components/ui/alert';
 import { Button } from '../components/ui/button';
@@ -169,6 +170,8 @@ export default function SiteGroupDetailPage() {
           Site group &middot; {group.site_count} {group.site_count === 1 ? 'site' : 'sites'}
         </p>
       </div>
+
+      <AffectedSitesPanel siteGroupId={group.id} />
 
       {/* Tabs */}
       <div className="mb-4 sm:mb-6">

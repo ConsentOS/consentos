@@ -13,6 +13,7 @@ site's own.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,6 +35,8 @@ from src.services.config_snapshot import (
     build_site_snapshot,
     changed_sources,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PublishError(Exception):
@@ -65,6 +68,11 @@ class RevisionNotFoundError(PublishError, LookupError):
 class AlreadyLiveError(PublishError):
     code = "already_live"
     message = "That revision is already live"
+
+
+class SiteUnavailableError(PublishError):
+    code = "site_unavailable"
+    message = "The site is inactive or has been deleted"
 
 
 class NothingPublishedError(PublishError):
@@ -363,6 +371,156 @@ async def rollback_to_revision(
         requires_reconsent=requires_reconsent,
         rolled_back_from_id=source.id,
     )
+
+
+@dataclass(frozen=True)
+class AffectedSite:
+    """A published site whose draft differs from its live revision."""
+
+    site_id: uuid.UUID
+    name: str
+    domain: str
+    live_number: int
+    content_hash: str
+    changed_sources: list[dict[str, Any]]
+
+
+async def list_affected_sites(
+    db: AsyncSession, organisation_id: uuid.UUID, *, site_group_id: uuid.UUID | None = None
+) -> list[AffectedSite]:
+    """Published sites in the organisation, or one of its groups, with unpublished changes.
+
+    Sites that have never been published are left out: they go live only
+    when someone publishes them deliberately.
+    """
+    query = select(Site).where(
+        Site.organisation_id == organisation_id,
+        Site.is_active.is_(True),
+        Site.deleted_at.is_(None),
+        Site.live_revision_id.is_not(None),
+    )
+    if site_group_id is not None:
+        query = query.where(Site.site_group_id == site_group_id)
+    affected = []
+    for site in (await db.execute(query.order_by(Site.domain))).scalars().all():
+        status = await get_draft_status(db, site.id)
+        if status.has_unpublished_changes and status.live_revision is not None:
+            affected.append(
+                AffectedSite(
+                    site_id=site.id,
+                    name=site.display_name or site.domain,
+                    domain=site.domain,
+                    live_number=status.live_revision.number,
+                    content_hash=status.content_hash,
+                    changed_sources=status.changed_sources,
+                )
+            )
+    return affected
+
+
+@dataclass(frozen=True)
+class BulkResult:
+    site_id: uuid.UUID
+    status: str
+    revision_number: int | None = None
+    error_message: str | None = None
+
+
+async def bulk_publish(
+    db: AsyncSession,
+    organisation_id: uuid.UUID,
+    items: list[tuple[uuid.UUID, str]],
+    *,
+    published_by: uuid.UUID | None,
+    note: str | None,
+    requires_reconsent: bool,
+) -> tuple[uuid.UUID, list[BulkResult]]:
+    """Publish each site as its own revision, carrying on past failures.
+
+    ``items`` pairs each site with the draft hash the publisher reviewed.
+    Each publish runs in its own savepoint, so one failing leaves the
+    others, and its own live revision, untouched. Every item is logged
+    under one batch id.
+    """
+    batch_id = uuid.uuid4()
+    in_org = set(
+        (
+            await db.execute(
+                select(Site.id).where(
+                    Site.organisation_id == organisation_id,
+                    Site.id.in_([site_id for site_id, _ in items]),
+                )
+            )
+        ).scalars()
+    )
+    results = []
+    for site_id, expected_content_hash in items:
+        if site_id not in in_org:
+            results.append(BulkResult(site_id, "failed", error_message="Site not found"))
+            continue
+        results.append(
+            await _publish_one(
+                db,
+                site_id,
+                expected_content_hash,
+                batch_id=batch_id,
+                published_by=published_by,
+                note=note,
+                requires_reconsent=requires_reconsent,
+            )
+        )
+    return batch_id, results
+
+
+async def _publish_one(
+    db: AsyncSession,
+    site_id: uuid.UUID,
+    expected_content_hash: str,
+    *,
+    batch_id: uuid.UUID,
+    published_by: uuid.UUID | None,
+    note: str | None,
+    requires_reconsent: bool,
+) -> BulkResult:
+    error: PublishError | None = None
+    try:
+        async with db.begin_nested():
+            revision = await publish_draft(
+                db,
+                site_id,
+                expected_content_hash=expected_content_hash,
+                published_by=published_by,
+                note=note,
+                requires_reconsent=requires_reconsent,
+            )
+    except SiteNotFoundError:
+        error = SiteUnavailableError()
+    except PublishError as exc:
+        error = exc
+    except Exception:
+        # One site's unexpected failure must not stop the rest of the batch.
+        logger.exception("Bulk publish failed for site %s", site_id)
+        error = PublishError()
+
+    if error is not None:
+        await record_attempt(
+            db,
+            site_id,
+            action="bulk_publish",
+            attempted_by=published_by,
+            error=error,
+            batch_id=batch_id,
+        )
+        return BulkResult(site_id, "failed", error_message=error.message)
+    await record_attempt(
+        db,
+        site_id,
+        action="bulk_publish",
+        attempted_by=published_by,
+        revision=revision,
+        batch_id=batch_id,
+    )
+    return BulkResult(site_id, "succeeded", revision_number=revision.number)
 
 
 async def discard_draft(db: AsyncSession, site_id: uuid.UUID) -> None:
