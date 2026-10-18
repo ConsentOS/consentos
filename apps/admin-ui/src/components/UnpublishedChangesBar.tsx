@@ -2,6 +2,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
 import { getDraftStatus } from '../api/revisions';
+import { useAuthStore } from '../stores/auth';
+import DiscardDialog from './DiscardDialog';
+import { canPublish } from './permissions';
 import PublishDialog from './PublishDialog';
 import { Button } from './ui/button';
 
@@ -13,6 +16,8 @@ interface Props {
 export default function UnpublishedChangesBar({ siteId }: Props) {
   const queryClient = useQueryClient();
   const [reviewing, setReviewing] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const { user } = useAuthStore();
   const { data } = useQuery({
     queryKey: ['sites', siteId, 'draft'],
     queryFn: () => getDraftStatus(siteId),
@@ -50,10 +55,24 @@ export default function UnpublishedChangesBar({ siteId }: Props) {
           <p className="text-xs">Visitors see the built-in defaults until you publish.</p>
         )}
       </div>
-      <Button size="sm" onClick={() => setReviewing(true)}>
-        Review and publish
-      </Button>
+      <div className="flex gap-2">
+        {live && canPublish(user) && (
+          <Button size="sm" variant="outline" onClick={() => setDiscarding(true)}>
+            Discard changes
+          </Button>
+        )}
+        <Button size="sm" onClick={() => setReviewing(true)}>
+          Review and publish
+        </Button>
+      </div>
       {reviewing && <PublishDialog siteId={siteId} onClose={() => setReviewing(false)} />}
+      {discarding && live && (
+        <DiscardDialog
+          siteId={siteId}
+          liveNumber={live.number}
+          onClose={() => setDiscarding(false)}
+        />
+      )}
     </div>
   );
 }

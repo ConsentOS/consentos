@@ -18,13 +18,16 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from src.models.cookie import Cookie, CookieAllowListEntry
 from src.models.publish_attempt import PublishAttempt
 from src.models.site import Site
+from src.models.site_config import SiteConfig
 from src.models.site_config_revision import SiteConfigRevision
+from src.models.translation import Translation
 from src.models.user import User
 from src.services.config_snapshot import (
     SiteNotFoundError,
@@ -62,6 +65,11 @@ class RevisionNotFoundError(PublishError, LookupError):
 class AlreadyLiveError(PublishError):
     code = "already_live"
     message = "That revision is already live"
+
+
+class NothingPublishedError(PublishError):
+    code = "not_published"
+    message = "Nothing has been published yet, so there is nothing to go back to"
 
 
 @dataclass(frozen=True)
@@ -354,6 +362,91 @@ async def rollback_to_revision(
         published_by=published_by,
         requires_reconsent=requires_reconsent,
         rolled_back_from_id=source.id,
+    )
+
+
+async def discard_draft(db: AsyncSession, site_id: uuid.UUID) -> None:
+    """Put the site's own values back to what the live revision recorded.
+
+    Restores the site's config fields, translations, cookie reviews and
+    allow-list. Changes inherited from organisation or site group
+    defaults are not the site's to discard, so they remain. Cookies
+    discovered since the publish stay in the review list, and a cookie
+    deleted since can't be brought back.
+
+    Raises:
+        SiteNotFoundError: the site doesn't exist or isn't active.
+        NothingPublishedError: there is no live revision to go back to.
+    """
+    site = await _lock_site(db, site_id)
+    live = await _live_for_update(db, site)
+    if live is None:
+        raise NothingPublishedError(str(site_id))
+    layer = live.site_layer
+    await _restore_site_config(db, site_id, layer.get("site_config") or {})
+    await _restore_translations(db, site_id, layer.get("translations") or {})
+    await _restore_cookie_reviews(db, site_id, layer.get("cookies") or [])
+    await _restore_allow_list(db, site_id, layer.get("allow_list") or [])
+    await db.flush()
+
+
+async def _restore_site_config(
+    db: AsyncSession, site_id: uuid.UUID, values: dict[str, Any]
+) -> None:
+    # An empty layer means the site had no config row when published.
+    if values:
+        await db.execute(update(SiteConfig).where(SiteConfig.site_id == site_id).values(**values))
+
+
+async def _restore_translations(
+    db: AsyncSession, site_id: uuid.UUID, recorded: dict[str, dict[str, str]]
+) -> None:
+    existing = {
+        translation.locale: translation
+        for translation in (
+            await db.execute(select(Translation).where(Translation.site_id == site_id))
+        ).scalars()
+    }
+    for locale, translation in existing.items():
+        if locale not in recorded:
+            await db.delete(translation)
+    for locale, strings in recorded.items():
+        if locale in existing:
+            existing[locale].strings = strings
+        else:
+            db.add(Translation(site_id=site_id, locale=locale, strings=strings))
+
+
+async def _restore_cookie_reviews(
+    db: AsyncSession, site_id: uuid.UUID, recorded: list[dict[str, Any]]
+) -> None:
+    for cookie in recorded:
+        category_id = cookie["category_id"]
+        await db.execute(
+            update(Cookie)
+            .where(Cookie.id == uuid.UUID(cookie["id"]), Cookie.site_id == site_id)
+            .values(
+                category_id=uuid.UUID(category_id) if category_id else None,
+                review_status=cookie["review_status"],
+            )
+        )
+
+
+async def _restore_allow_list(
+    db: AsyncSession, site_id: uuid.UUID, recorded: list[dict[str, Any]]
+) -> None:
+    # Deleted straight away rather than through the session, which would
+    # insert the replacements first and trip the unique constraint.
+    await db.execute(delete(CookieAllowListEntry).where(CookieAllowListEntry.site_id == site_id))
+    db.add_all(
+        CookieAllowListEntry(
+            site_id=site_id,
+            category_id=uuid.UUID(entry["category_id"]),
+            name_pattern=entry["name_pattern"],
+            domain_pattern=entry["domain_pattern"],
+            description=entry["description"],
+        )
+        for entry in recorded
     )
 
 
