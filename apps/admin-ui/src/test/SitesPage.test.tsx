@@ -32,6 +32,14 @@ vi.mock('../api/sites', () => ({
   updateSite: vi.fn(),
 }));
 
+vi.mock('../api/installation', () => ({
+  listInstallations: () =>
+    Promise.resolve([
+      { site_id: 'site-1', state: 'installed', last_seen_at: '2026-10-18T10:00:00Z' },
+      { site_id: 'site-2', state: 'not_detected', last_seen_at: null },
+    ]),
+}));
+
 vi.mock('../api/site-groups', () => ({
   listSiteGroups: () => Promise.resolve([]),
   createSiteGroup: vi.fn(),
@@ -53,5 +61,19 @@ describe('SitesPage', () => {
     const badges = await screen.findAllByText('Not yet published');
     expect(badges).toHaveLength(2);
     expect(badges[0].closest('a')).toHaveAttribute('href', '/sites/site-2');
+  });
+
+  it('shows whether the banner is installed on each site', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SitesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findAllByText('Installed')).toHaveLength(2);
+    expect(screen.getAllByText('Not detected')).toHaveLength(2);
   });
 });

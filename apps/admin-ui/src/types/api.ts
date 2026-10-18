@@ -307,6 +307,39 @@ export interface SiteInstall {
   domains: string[];
 }
 
+export type InstallationState = 'not_detected' | 'installed' | 'problem';
+
+export interface InstallationCheckItem {
+  key: string;
+  label: string;
+  status: 'passed' | 'failed' | 'skipped';
+  severity: 'error' | 'warning';
+  detail: string | null;
+  fix: string | null;
+}
+
+export interface InstallationCheckResult {
+  url: string;
+  checked_at: string;
+  ok: boolean;
+  checks: InstallationCheckItem[];
+}
+
+export interface Installation {
+  state: InstallationState;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  last_seen_url: string | null;
+  last_check_at: string | null;
+  last_check: InstallationCheckResult | null;
+}
+
+export interface InstallationSummary {
+  site_id: string;
+  state: InstallationState;
+  last_seen_at: string | null;
+}
+
 export interface ScanJob {
   id: string;
   site_id: string;

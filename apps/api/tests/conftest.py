@@ -21,7 +21,7 @@ import uuid
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.main import create_app
 from src.models.base import Base
@@ -136,7 +136,7 @@ async def db_client(_test_engine, _setup_db):
     Each request gets an independent session/connection so there are no
     'another operation is in progress' errors from asyncpg.
     """
-    from src.db import get_db
+    from src.db import get_db, get_session_factory
 
     app = create_app()
 
@@ -150,6 +150,9 @@ async def db_client(_test_engine, _setup_db):
                 raise
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_session_factory] = lambda: async_sessionmaker(
+        _test_engine, expire_on_commit=False
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

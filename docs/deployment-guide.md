@@ -708,6 +708,14 @@ Saving configuration no longer changes what visitors see. Edits build up in a dr
 
 **Caching.** `GET /config/sites/{id}/geo-resolved` now only changes when someone publishes. Responses for a draft preview link are sent with `Cache-Control: no-store`.
 
+### Installation checks
+
+Migration `0014` adds the `site_installations` table, which records when the banner was last seen on each site and the result of the last installation check. It runs with the others on startup and needs no manual steps.
+
+The banner's configuration requests now also record which site they came from, through a short-lived key per site and host in Redis. Nothing is recorded while Redis is unavailable, and the banner is unaffected.
+
+**Check now** uses the scanner's new `POST /check-install` endpoint, so upgrade the scanner with the API.
+
 ### Install snippet addresses
 
 The install snippet on a site's **Overview** now comes from `CDN_BASE_URL` and the new `PUBLIC_API_URL`, instead of always using the admin UI's address. `CDN_BASE_URL` was previously unused, so check it before upgrading: if it is set to an address that doesn't serve `consent-loader.js`, the snippet will be wrong. Snippets already on your sites keep working. The Helm chart's `cdn.baseUrl` used to default to `https://cdn.example.com` and now defaults to empty, so leave it empty unless the banner is served from somewhere other than the admin UI.

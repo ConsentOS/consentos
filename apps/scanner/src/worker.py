@@ -156,6 +156,38 @@ def build_scan_response(result: SiteCrawlResult) -> ScanResponse:
     )
 
 
+class CheckInstallRequest(BaseModel):
+    """Load a page and report how the banner is installed on it."""
+
+    url: str
+
+
+class LoaderTagResponse(BaseModel):
+    src: str
+    site_id: str | None
+    api_base: str | None
+    cdn_base: str | None
+    is_async: bool
+    is_defer: bool
+    in_head: bool
+    first_script: bool
+
+
+class ConfigRequestResponse(BaseModel):
+    url: str
+    status: int | None
+
+
+class CheckInstallResponse(BaseModel):
+    url: str
+    final_url: str | None = None
+    reachable: bool
+    error: str | None = None
+    loader: LoaderTagResponse | None = None
+    config_requests: list[ConfigRequestResponse] = Field(default_factory=list)
+    banner_rendered: bool
+
+
 # ── Application ──────────────────────────────────────────────────────
 
 
@@ -278,6 +310,27 @@ def create_app():  # noqa: ANN201
                     task.cancel()
 
         return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+    @app.post("/check-install", response_model=CheckInstallResponse)
+    async def run_check_install(body: CheckInstallRequest) -> CheckInstallResponse:
+        """Load a page as a first-time visitor and report on the banner."""
+        from dataclasses import asdict
+
+        from src.install_check import check_install
+
+        if urlparse(body.url).scheme not in ALLOWED_SCHEMES:
+            raise HTTPException(status_code=400, detail="URL must use http or https")
+        policy = NavigationPolicy(allow_private_networks=settings.scanner_allow_private_networks)
+        if not await policy.is_allowed(body.url):
+            raise HTTPException(status_code=400, detail="URL is not permitted")
+
+        result = await check_install(
+            body.url,
+            headless=settings.crawler_headless,
+            timeout_ms=settings.crawler_timeout_ms,
+            policy=policy,
+        )
+        return CheckInstallResponse.model_validate(asdict(result))
 
     @app.post("/validate", response_model=ValidationResponse)
     async def run_validation(body: ValidationRequest) -> ValidationResponse:

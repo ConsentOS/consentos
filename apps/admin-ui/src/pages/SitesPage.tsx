@@ -3,8 +3,10 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { createSiteGroup, deleteSiteGroup, listSiteGroups } from '../api/site-groups';
+import { listInstallations } from '../api/installation';
 import { listSites, updateSite } from '../api/sites';
 import CreateSiteModal from '../components/CreateSiteModal';
+import { InstallationBadge } from '../components/InstallationStatus';
 import { Button } from '../components/ui/button.tsx';
 import { Badge } from '../components/ui/badge.tsx';
 import { Modal } from '../components/ui/modal.tsx';
@@ -13,7 +15,7 @@ import { Input } from '../components/ui/input.tsx';
 import { Alert } from '../components/ui/alert.tsx';
 import { EmptyState } from '../components/ui/empty-state.tsx';
 import { LoadingState } from '../components/ui/loading-state.tsx';
-import type { Site, SiteGroup } from '../types/api';
+import type { InstallationSummary, Site, SiteGroup } from '../types/api';
 
 export default function SitesPage() {
   const queryClient = useQueryClient();
@@ -281,6 +283,12 @@ function SiteTable({
   onRemoveFromGroup?: (siteId: string) => void;
   onAssignGroup?: (siteId: string, groupId: string) => void;
 }) {
+  const { data: installations } = useQuery({
+    queryKey: ['installations'],
+    queryFn: listInstallations,
+  });
+  const installationOf = (siteId: string) => installations?.find((i) => i.site_id === siteId);
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       {/* Desktop table */}
@@ -306,7 +314,7 @@ function SiteTable({
                   {site.display_name ?? site.name ?? '-'}
                 </td>
                 <td className="px-4 py-3 lg:px-6">
-                  <SiteStatus site={site} />
+                  <SiteStatus site={site} installation={installationOf(site.id)} />
                 </td>
                 <td className="hidden px-4 py-3 text-sm text-text-secondary md:table-cell lg:px-6">
                   {new Date(site.created_at).toLocaleDateString()}
@@ -346,7 +354,7 @@ function SiteTable({
                 </p>
               </div>
               <div className="ml-2 shrink-0">
-                <SiteStatus site={site} />
+                <SiteStatus site={site} installation={installationOf(site.id)} />
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
@@ -444,8 +452,14 @@ function GroupAssigner({
   return <span className="text-xs text-text-tertiary">&mdash;</span>;
 }
 
-/** Active or inactive, and whether visitors are seeing a published config yet. */
-function SiteStatus({ site }: { site: Site }) {
+/** Active or inactive, whether a config is published, and whether the banner is installed. */
+function SiteStatus({
+  site,
+  installation,
+}: {
+  site: Site;
+  installation: InstallationSummary | undefined;
+}) {
   return (
     <div className="flex flex-wrap gap-1">
       <Badge variant={site.is_active ? 'success' : 'neutral'}>
@@ -456,6 +470,7 @@ function SiteStatus({ site }: { site: Site }) {
           <Badge variant="warning">Not yet published</Badge>
         </Link>
       )}
+      {installation && <InstallationBadge state={installation.state} />}
     </div>
   );
 }

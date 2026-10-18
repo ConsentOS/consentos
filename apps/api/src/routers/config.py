@@ -1,10 +1,11 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.db import get_db
+from src.db import get_db, get_session_factory
 from src.models.cookie import CookieCategory
 from src.models.site import Site
 from src.models.site_config import SiteConfig
@@ -31,8 +32,12 @@ from src.services.config_snapshot import (
 )
 from src.services.dependencies import require_role
 from src.services.geoip import detect_region
+from src.services.installation import record_banner_load
+from src.services.site_domains import request_source_url
 
 router = APIRouter(prefix="/config", tags=["config"])
+
+NOT_PUBLISHED_DETAIL = "No published configuration for this site"
 
 
 @router.get("/sites/{site_id}", response_model=SiteConfigResponse)
@@ -119,15 +124,17 @@ async def get_resolved_config(
     )
 
 
-@router.get("/sites/{site_id}/geo-resolved")
+@router.get("/sites/{site_id}/geo-resolved", response_model=None)
 async def get_geo_resolved_config(
     site_id: uuid.UUID,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     locale: str | None = None,
     preview: str | None = None,
     db: AsyncSession = Depends(get_db),
-) -> dict:
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
+) -> dict | JSONResponse:
     """Public endpoint: the live revision for the visitor's detected region.
 
     Serves the site's live revision, so saved but unpublished changes are
@@ -145,7 +152,18 @@ async def get_geo_resolved_config(
     if preview and preview_site_id(preview) == site_id:
         return await _preview_config(site_id, request, response, locale, db)
 
-    revision = await _require_live_revision(site_id, db)
+    # Noted after the response is sent, so it can't slow the banner.
+    background_tasks.add_task(record_banner_load, session_factory, site_id, _page_url(request))
+
+    revision = await get_live_revision(db, site_id)
+    if revision is None:
+        # Returned rather than raised so the sighting is still recorded:
+        # the banner is installed even though nothing is published yet.
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": NOT_PUBLISHED_DETAIL},
+            background=background_tasks,
+        )
     geo = await detect_region(request)
     public = render_public_config(
         revision.snapshot,
@@ -159,6 +177,11 @@ async def get_geo_resolved_config(
     # Sent back with each consent so the record shows what was served.
     public["revision_id"] = str(revision.id)
     return public
+
+
+def _page_url(request: Request) -> str | None:
+    """The page the banner is on: the Referer when sent, else the Origin."""
+    return request.headers.get("referer") or request_source_url(request)
 
 
 async def _preview_config(
@@ -197,10 +220,7 @@ async def _require_live_revision(site_id: uuid.UUID, db: AsyncSession) -> SiteCo
         # Also covers sites that don't exist, so an unpublished site can't
         # be told apart from a missing one. The banner uses its built-in
         # defaults on any non-success response.
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No published configuration for this site",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_PUBLISHED_DETAIL)
     return revision
 
 

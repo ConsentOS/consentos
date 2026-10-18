@@ -15,6 +15,19 @@ vi.mock('../api/sites', () => ({
     Promise.resolve({ api_base: null, cdn_base: null, domains: ['example.com'] }),
 }));
 
+vi.mock('../api/installation', () => ({
+  getInstallation: () =>
+    Promise.resolve({
+      state: 'not_detected',
+      first_seen_at: null,
+      last_seen_at: null,
+      last_seen_url: null,
+      last_check_at: null,
+      last_check: null,
+    }),
+  checkInstallation: vi.fn(),
+}));
+
 vi.mock('../api/revisions', () => ({
   getDraftStatus: () =>
     Promise.resolve({

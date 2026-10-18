@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.routers.sites import _base_url
+from src.config.settings import configured_base_url
 
 try:
     from tests.conftest import create_test_site, requires_db
@@ -74,4 +74,4 @@ class TestSiteInstall:
     ],
 )
 def test_base_url_normalisation(value, expected):
-    assert _base_url(value) == expected
+    assert configured_base_url(value) == expected
