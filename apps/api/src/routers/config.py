@@ -5,12 +5,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
-from src.models.cookie import Cookie, CookieCategory
+from src.models.cookie import CookieCategory
 from src.models.site import Site
 from src.models.site_config import SiteConfig
 from src.models.site_config_revision import SiteConfigRevision
 from src.schemas.auth import CurrentUser
-from src.schemas.cookie import ReviewStatus
 from src.schemas.site import SiteConfigResponse
 from src.services.config_layers import (
     get_site_group_id,
@@ -164,81 +163,43 @@ async def get_public_cookies(
     site_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Public endpoint: cookies grouped by category for the embedded widget.
+    """Public endpoint: the live revision's cookies, grouped by category.
 
-    Returns the same shape the hosted-page template used to render server
-    side, as JSON. Categories are filtered to those the site has enabled
-    via the resolved cascade; cookies with no category fall under an
-    explicit ``uncategorised`` bucket so operators can spot them.
+    Feeds the embedded cookies widget. Categories are limited to those
+    the live revision enables; cookies with no category fall under an
+    explicit ``uncategorised`` bucket so operators can spot them. Only
+    the category names and descriptions come from the shared taxonomy;
+    which cookies are listed, and where, is what the revision recorded.
     """
-    site_result = await db.execute(
-        select(Site).where(
-            Site.id == site_id,
-            Site.is_active.is_(True),
-            Site.deleted_at.is_(None),
-        )
-    )
-    site = site_result.scalar_one_or_none()
-    if site is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Site not found",
-        )
+    revision = await _require_live_revision(site_id, db)
+    site = await db.get(Site, site_id)
+    config = revision.snapshot["config"]
+    enabled_slugs = set(config.get("enabled_categories") or [])
 
-    config_result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
-    config = config_result.scalar_one_or_none()
-
-    org_id = await get_site_org_id(site_id, db)
-    org_defaults = await load_org_defaults(org_id, db) if org_id else None
-    group_id = await get_site_group_id(site_id, db)
-    group_defaults = await load_group_defaults(group_id, db) if group_id else None
-    resolved = resolve_config(
-        orm_to_config_dict(config) if config else {},
-        org_defaults=org_defaults,
-        group_defaults=group_defaults,
-    )
-    enabled_slugs = set(resolved.get("enabled_categories") or [])
+    by_slug: dict[str | None, list[dict]] = {}
+    for cookie in revision.snapshot.get("cookies", []):
+        by_slug.setdefault(cookie["category"], []).append(_public_cookie(cookie))
 
     cat_result = await db.execute(select(CookieCategory).order_by(CookieCategory.display_order))
-    all_categories = list(cat_result.scalars().all())
-
-    cookie_result = await db.execute(
-        select(Cookie).where(Cookie.site_id == site_id).order_by(Cookie.name)
-    )
-    cookies = list(cookie_result.scalars().all())
-
-    by_cat_id: dict[uuid.UUID, list[Cookie]] = {}
-    uncategorised: list[Cookie] = []
-    for cookie in cookies:
-        if cookie.review_status == ReviewStatus.rejected:
-            continue
-        if cookie.category_id:
-            by_cat_id.setdefault(cookie.category_id, []).append(cookie)
-        else:
-            uncategorised.append(cookie)
-
-    categories_out = []
-    for cat in all_categories:
-        if cat.slug not in enabled_slugs:
-            continue
-        categories_out.append(
-            {
-                "slug": cat.slug,
-                "name": cat.name,
-                "description": cat.description or "",
-                "locked": cat.is_essential,
-                "cookies": [_cookie_to_dict(c) for c in by_cat_id.get(cat.id, [])],
-            }
-        )
-
-    if uncategorised:
+    categories_out = [
+        {
+            "slug": cat.slug,
+            "name": cat.name,
+            "description": cat.description or "",
+            "locked": cat.is_essential,
+            "cookies": by_slug.get(cat.slug, []),
+        }
+        for cat in cat_result.scalars().all()
+        if cat.slug in enabled_slugs
+    ]
+    if by_slug.get(None):
         categories_out.append(
             {
                 "slug": "uncategorised",
                 "name": "Uncategorised",
-                "description": ("Cookies that have not yet been assigned to a category."),
+                "description": "Cookies that have not yet been assigned to a category.",
                 "locked": False,
-                "cookies": [_cookie_to_dict(c) for c in uncategorised],
+                "cookies": by_slug[None],
             }
         )
 
@@ -246,20 +207,14 @@ async def get_public_cookies(
         "site_id": str(site_id),
         "site_name": site.display_name or site.domain,
         "domain": site.domain,
-        "privacy_policy_url": resolved.get("privacy_policy_url"),
-        "consent_expiry_days": resolved.get("consent_expiry_days") or 365,
+        "privacy_policy_url": config.get("privacy_policy_url"),
+        "consent_expiry_days": config.get("consent_expiry_days") or 365,
         "categories": categories_out,
     }
 
 
-def _cookie_to_dict(cookie: Cookie) -> dict:
-    return {
-        "name": cookie.name,
-        "domain": cookie.domain,
-        "type": cookie.storage_type,
-        "description": cookie.description or "",
-        "vendor": cookie.vendor or "",
-    }
+def _public_cookie(cookie: dict) -> dict:
+    return {key: cookie[key] for key in ("name", "domain", "type", "description", "vendor")}
 
 
 @router.get("/geo")

@@ -437,6 +437,72 @@ class TestPublishAttempts:
         assert attempt["error_message"] == "The publish failed. Nothing was changed."
 
 
+async def _widget(client, site_id) -> dict:
+    resp = await client.get(f"/api/v1/config/sites/{site_id}/cookies")
+    assert resp.status_code == 200, resp.text
+    return {cat["slug"]: [c["name"] for c in cat["cookies"]] for cat in resp.json()["categories"]}
+
+
+async def _category_id(client, headers, slug) -> str:
+    resp = await client.get("/api/v1/cookies/categories", headers=headers)
+    return next(cat["id"] for cat in resp.json() if cat["slug"] == slug)
+
+
+@requires_db
+class TestVersionedCookieRules:
+    async def test_classification_reaches_visitors_only_on_publish(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        analytics = await _category_id(db_client, auth_headers, "analytics")
+        cookies = {}
+        for name in ("_ga", "_rejected", "_pending"):
+            resp = await db_client.post(
+                f"/api/v1/cookies/sites/{site_id}",
+                headers=auth_headers,
+                json={"name": name, "domain": ".x.test"},
+            )
+            cookies[name] = resp.json()["id"]
+
+        async def review(name, **body):
+            resp = await db_client.patch(
+                f"/api/v1/cookies/sites/{site_id}/{cookies[name]}", headers=auth_headers, json=body
+            )
+            assert resp.status_code == 200, resp.text
+
+        await review("_rejected", review_status="rejected")
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        assert (await _widget(db_client, site_id))["uncategorised"] == ["_ga", "_pending"]
+
+        await review("_ga", category_id=analytics, review_status="approved")
+        assert (await _widget(db_client, site_id))["uncategorised"] == ["_ga", "_pending"]
+        assert (await _draft(db_client, auth_headers, site_id))["has_unpublished_changes"] is True
+
+        await _publish_draft(db_client, auth_headers, site_id)
+        published = await _widget(db_client, site_id)
+        assert published["analytics"] == ["_ga"]
+        assert published["uncategorised"] == ["_pending"]
+
+        await _rollback(db_client, auth_headers, site_id, first["id"])
+        assert (await _widget(db_client, site_id))["uncategorised"] == ["_ga", "_pending"]
+
+    async def test_new_discoveries_show_in_review_straight_away(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        await _publish_draft(db_client, auth_headers, site_id)
+        await db_client.post(
+            f"/api/v1/cookies/sites/{site_id}",
+            headers=auth_headers,
+            json={"name": "_new", "domain": ".x.test"},
+        )
+
+        listed = await db_client.get(f"/api/v1/cookies/sites/{site_id}", headers=auth_headers)
+        assert [c["name"] for c in listed.json()] == ["_new"]
+        assert "uncategorised" not in await _widget(db_client, site_id)
+
+    async def test_unpublished_site_has_no_widget(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        resp = await db_client.get(f"/api/v1/config/sites/{site_id}/cookies")
+        assert resp.status_code == 404
+
+
 @requires_db
 class TestOrgScoping:
     async def test_other_org_cannot_see_or_publish(
