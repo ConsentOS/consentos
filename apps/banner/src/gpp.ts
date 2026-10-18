@@ -12,7 +12,7 @@
  * @see https://github.com/InteractiveAdvertisingBureau/Global-Privacy-Platform
  */
 
-import { BitWriter, BitReader, bytesToBase64url, base64urlToBytes } from '../../../apps/banner/src/tcf';
+import { BitWriter, BitReader, bytesToBase64url, base64urlToBytes } from './tcf';
 
 // ── GPP consent field values ─────────────────────────────────────────
 
