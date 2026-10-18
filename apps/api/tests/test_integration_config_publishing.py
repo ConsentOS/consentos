@@ -503,6 +503,82 @@ class TestVersionedCookieRules:
         assert resp.status_code == 404
 
 
+async def _diff(client, headers, site_id, **params) -> dict:
+    resp = await client.get(f"/api/v1/config/sites/{site_id}/diff", headers=headers, params=params)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+@requires_db
+class TestDiff:
+    async def test_draft_against_live(self, db_client, auth_headers, _test_engine, test_org):
+        site_id = await create_test_site(db_client, auth_headers)
+        live = await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, terms_url="https://x.test/t")
+        async with AsyncSession(_test_engine) as session:
+            org_config = (
+                await session.execute(
+                    select(OrgConfig).where(OrgConfig.organisation_id == test_org.id)
+                )
+            ).scalar_one_or_none()
+            if org_config is None:
+                org_config = OrgConfig(organisation_id=test_org.id)
+                session.add(org_config)
+            org_config.privacy_policy_url = f"https://org/{uuid.uuid4().hex}"
+            await session.commit()
+
+        diff = await _diff(db_client, auth_headers, site_id)
+
+        assert diff["from"]["revision_id"] == live["id"]
+        assert diff["to"]["revision_id"] is None
+        assert (
+            diff["to"]["content_hash"]
+            == (await _draft(db_client, auth_headers, site_id))["content_hash"]
+        )
+        changes = {c["key"]: c for c in diff["changes"]}
+        assert changes["terms_url"]["source"] == "site"
+        assert changes["terms_url"]["after"] == "https://x.test/t"
+        assert changes["privacy_policy_url"]["source"] == "organisation"
+        assert changes["privacy_policy_url"]["area"] == "settings"
+
+    async def test_nothing_published_yet(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        diff = await _diff(db_client, auth_headers, site_id)
+        assert diff["from"] is None
+        assert diff["changes"]
+        assert diff["reconsent_reasons"] == []
+
+    async def test_two_revisions(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        first = await _publish_draft(db_client, auth_headers, site_id)
+        await _edit(db_client, auth_headers, site_id, enabled_categories=["necessary"])
+        second = await _publish_draft(db_client, auth_headers, site_id)
+
+        diff = await _diff(
+            db_client,
+            auth_headers,
+            site_id,
+            from_revision=first["id"],
+            to_revision=second["id"],
+        )
+
+        assert (diff["from"]["number"], diff["to"]["number"]) == (1, 2)
+        assert [c["key"] for c in diff["changes"]] == ["enabled_categories"]
+        assert diff["changes"][0]["area"] == "categories"
+        assert diff["reconsent_reasons"] == ["categories"]
+
+    async def test_another_sites_revision_is_not_found(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        other_site = await create_test_site(db_client, auth_headers)
+        other = await _publish_draft(db_client, auth_headers, other_site)
+        resp = await db_client.get(
+            f"/api/v1/config/sites/{site_id}/diff",
+            headers=auth_headers,
+            params={"from_revision": other["id"]},
+        )
+        assert resp.status_code == 404
+
+
 @requires_db
 class TestOrgScoping:
     async def test_other_org_cannot_see_or_publish(

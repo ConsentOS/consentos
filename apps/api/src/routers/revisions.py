@@ -12,6 +12,7 @@ from src.models.site import Site
 from src.models.site_config_revision import SiteConfigRevision
 from src.schemas.auth import CurrentUser
 from src.schemas.revision import (
+    DiffResponse,
     DraftStatusResponse,
     PublishRequest,
     RevisionDetail,
@@ -19,6 +20,7 @@ from src.schemas.revision import (
     RevisionSummary,
     RollbackRequest,
 )
+from src.services.config_diff import EMPTY, Version, diff_versions
 from src.services.config_publishing import (
     DraftStatus,
     PublishError,
@@ -33,7 +35,7 @@ from src.services.config_publishing import (
     record_attempt,
     rollback_to_revision,
 )
-from src.services.config_snapshot import SiteNotFoundError
+from src.services.config_snapshot import SiteNotFoundError, build_site_snapshot
 from src.services.dependencies import require_role
 
 router = APIRouter(prefix="/config", tags=["revisions"])
@@ -115,6 +117,68 @@ async def get_revision_detail(
         "rollback_reconsent_reasons": (
             reconsent_reasons(live.snapshot, entry.revision.snapshot) if live else []
         ),
+    }
+
+
+@router.get("/sites/{site_id}/diff", response_model=DiffResponse, response_model_by_alias=True)
+async def get_diff(
+    site_id: uuid.UUID,
+    from_revision: uuid.UUID | None = None,
+    to_revision: uuid.UUID | None = None,
+    current_user: CurrentUser = Depends(_ANY_ROLE),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """What changed between two versions of the site's config.
+
+    ``from_revision`` defaults to the live revision and ``to_revision``
+    to the current draft, so with neither this is what a publish would
+    change. ``to.content_hash`` is the hash to publish exactly what was
+    compared.
+    """
+    await _require_org_site(site_id, current_user, db)
+    before = (
+        await _revision_or_404(db, site_id, from_revision)
+        if from_revision
+        else await get_live_revision(db, site_id)
+    )
+    if to_revision:
+        after = await _revision_or_404(db, site_id, to_revision)
+        after_version = _version(after)
+        to_side = _side(after)
+    else:
+        built = await build_site_snapshot(db, site_id)
+        after_version = Version(built.snapshot, built.site_layer, built.sources)
+        to_side = {"revision_id": None, "number": None, "content_hash": built.content_hash}
+
+    before_version = _version(before) if before else EMPTY
+    return {
+        "from": _side(before) if before else None,
+        "to": to_side,
+        "changes": diff_versions(before_version, after_version),
+        "reconsent_reasons": (
+            reconsent_reasons(before_version.snapshot, after_version.snapshot) if before else []
+        ),
+    }
+
+
+async def _revision_or_404(
+    db: AsyncSession, site_id: uuid.UUID, revision_id: uuid.UUID
+) -> SiteConfigRevision:
+    entry = await get_revision(db, site_id, revision_id)
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    return entry.revision
+
+
+def _version(revision: SiteConfigRevision) -> Version:
+    return Version(revision.snapshot, revision.site_layer, revision.sources)
+
+
+def _side(revision: SiteConfigRevision) -> dict:
+    return {
+        "revision_id": revision.id,
+        "number": revision.number,
+        "content_hash": revision.content_hash,
     }
 
 

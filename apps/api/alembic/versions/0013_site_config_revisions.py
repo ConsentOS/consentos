@@ -363,6 +363,7 @@ def _publish_v1(conn: sa.engine.Connection, site: Any, shared: dict[str, Any]) -
             "kind": "organisation_config",
             "id": str(site.organisation_id),
             "content_hash": _hash(org_defaults or {}),
+            "values": org_defaults or {},
         }
     ]
     if site.group_id:
@@ -371,6 +372,7 @@ def _publish_v1(conn: sa.engine.Connection, site: Any, shared: dict[str, Any]) -
                 "kind": "site_group_config",
                 "id": str(site.group_id),
                 "content_hash": _hash(group_defaults or {}),
+                "values": group_defaults or {},
             }
         )
 

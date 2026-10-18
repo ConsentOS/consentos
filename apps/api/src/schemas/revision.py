@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -79,3 +80,32 @@ class DraftStatusResponse(BaseModel):
     # "vendors". Non-empty means asking visitors again is recommended.
     reconsent_reasons: list[str]
     last_attempt: LastAttempt | None
+
+
+class DiffSide(BaseModel):
+    # ``None`` for the draft, or for nothing published yet.
+    revision_id: uuid.UUID | None
+    number: int | None
+    content_hash: str | None
+
+
+class DiffChange(BaseModel):
+    # "settings", "banner", "translations", "categories", "cookies" or
+    # "other".
+    area: str
+    key: str
+    before: Any
+    after: Any
+    # Where the new value comes from: "site", "site_group",
+    # "organisation" or "system".
+    source: str
+
+
+class DiffResponse(BaseModel):
+    from_: DiffSide | None = Field(alias="from", serialization_alias="from")
+    to: DiffSide
+    changes: list[DiffChange]
+    # Changes to what visitors consented to.
+    reconsent_reasons: list[str]
+
+    model_config = {"populate_by_name": True}
