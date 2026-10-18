@@ -79,7 +79,11 @@ async def create_translation(
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
 ) -> Translation:
-    """Create a translation for a new locale."""
+    """Create a translation for a new locale.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user.organisation_id, db)
 
     # Check for duplicate locale
@@ -114,7 +118,11 @@ async def update_translation(
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
 ) -> Translation:
-    """Replace the strings for an existing locale translation."""
+    """Replace the strings for an existing locale translation.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user.organisation_id, db)
     result = await db.execute(
         select(Translation).where(
@@ -142,7 +150,11 @@ async def delete_translation(
     current_user: CurrentUser = Depends(require_role("owner", "admin")),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete a translation for a specific locale."""
+    """Delete a translation for a specific locale.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user.organisation_id, db)
     result = await db.execute(
         select(Translation).where(
