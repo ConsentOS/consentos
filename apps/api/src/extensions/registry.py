@@ -64,6 +64,9 @@ class ExtensionRegistry:
     )
     config_enrichers: list[Callable] = field(default_factory=list)
     consent_record_hooks: list[Callable] = field(default_factory=list)
+    pre_publish_checks: list[Callable] = field(default_factory=list)
+    post_publish_hooks: list[Callable] = field(default_factory=list)
+    config_source_providers: list[Callable] = field(default_factory=list)
     auth_provider: AuthProvider | None = None
     task_modules: list[str] = field(default_factory=list)
     periodic_tasks: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -96,6 +99,15 @@ class ExtensionRegistry:
 
     def add_consent_record_hook(self, hook: Callable) -> None:
         self.consent_record_hooks.append(hook)
+
+    def add_pre_publish_check(self, check: Callable) -> None:
+        self.pre_publish_checks.append(check)
+
+    def add_post_publish_hook(self, hook: Callable) -> None:
+        self.post_publish_hooks.append(hook)
+
+    def add_config_source_provider(self, provider: Callable) -> None:
+        self.config_source_providers.append(provider)
 
     def add_task_module(self, module_path: str) -> None:
         if module_path not in self.task_modules:
@@ -201,6 +213,44 @@ def register_consent_record_hook(hook: Callable) -> None:
     webhooks.
     """
     _registry.add_consent_record_hook(hook)
+
+
+def register_pre_publish_check(check: Callable) -> None:
+    """Register a check that can stop a publish, bulk publish or rollback.
+
+    The callable signature is
+    ``async (db: AsyncSession, site_id: UUID, action: str, snapshot: dict) -> str | None``.
+    ``action`` is ``"publish"``, ``"bulk_publish"`` or ``"rollback"`` and
+    ``snapshot`` is what would go live. Return ``None`` to allow it, or a
+    plain-language reason to block it. A blocked action changes nothing,
+    and the reason is shown to the user and kept in the publish log.
+    """
+    _registry.add_pre_publish_check(check)
+
+
+def register_post_publish_hook(hook: Callable) -> None:
+    """Register a callable invoked after a revision goes live.
+
+    The callable signature is
+    ``async (db: AsyncSession, revision: SiteConfigRevision) -> None``.
+    It runs for publishes, bulk publishes and rollbacks, inside the same
+    transaction. A hook that raises is logged and its changes are rolled
+    back, but the publish itself still goes ahead.
+    """
+    _registry.add_post_publish_hook(hook)
+
+
+def register_config_source_provider(provider: Callable) -> None:
+    """Register extra layers a site's config is built from.
+
+    The callable signature is
+    ``async (db: AsyncSession, site_id: UUID) -> list[dict]``, returning
+    entries of ``{"kind": str, "id": str, "values": dict}``. They are
+    recorded with each revision alongside the organisation and site
+    group layers, so the admin UI prompts to publish when one of them
+    changes. Use a ``kind`` unique to the extension.
+    """
+    _registry.add_config_source_provider(provider)
 
 
 def register_auth_provider(provider: AuthProvider) -> None:

@@ -23,6 +23,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from src.extensions.registry import get_registry
 from src.models.cookie import Cookie, CookieAllowListEntry
 from src.models.publish_attempt import PublishAttempt
 from src.models.site import Site
@@ -73,6 +74,16 @@ class AlreadyLiveError(PublishError):
 class SiteUnavailableError(PublishError):
     code = "site_unavailable"
     message = "The site is inactive or has been deleted"
+
+
+class BlockedByCheckError(PublishError):
+    """An installed extension's pre-publish check refused the action."""
+
+    code = "blocked_by_check"
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.message = reason
 
 
 class NothingPublishedError(PublishError):
@@ -297,6 +308,7 @@ async def publish_draft(
     published_by: uuid.UUID | None,
     note: str | None = None,
     requires_reconsent: bool = False,
+    action: str = "publish",
 ) -> SiteConfigRevision:
     """Freeze the current draft into a new live revision.
 
@@ -308,6 +320,7 @@ async def publish_draft(
         SiteNotFoundError: the site doesn't exist or isn't active.
         DraftOutOfDateError: the draft no longer matches what was reviewed.
         NothingToPublishError: the draft matches the live revision.
+        BlockedByCheckError: an extension's pre-publish check refused it.
     """
     site = await _lock_site(db, site_id)
     built = await build_site_snapshot(db, site_id)
@@ -322,6 +335,7 @@ async def publish_draft(
         db,
         site,
         live,
+        action=action,
         snapshot=built.snapshot,
         site_layer=built.site_layer,
         sources=built.sources,
@@ -350,6 +364,7 @@ async def rollback_to_revision(
         SiteNotFoundError: the site doesn't exist or isn't active.
         RevisionNotFoundError: the revision isn't one of this site's.
         AlreadyLiveError: the revision is already live.
+        BlockedByCheckError: an extension's pre-publish check refused it.
     """
     site = await _lock_site(db, site_id)
     source = await db.get(SiteConfigRevision, revision_id)
@@ -362,6 +377,7 @@ async def rollback_to_revision(
         db,
         site,
         await _live_for_update(db, site),
+        action="rollback",
         snapshot=source.snapshot,
         site_layer=source.site_layer,
         sources=source.sources,
@@ -492,6 +508,7 @@ async def _publish_one(
                 published_by=published_by,
                 note=note,
                 requires_reconsent=requires_reconsent,
+                action="bulk_publish",
             )
     except SiteNotFoundError:
         error = SiteUnavailableError()
@@ -638,6 +655,7 @@ async def _make_live(
     site: Site,
     live: SiteConfigRevision | None,
     *,
+    action: str,
     snapshot: dict[str, Any],
     site_layer: dict[str, Any],
     sources: list[dict[str, Any]],
@@ -651,7 +669,13 @@ async def _make_live(
 
     It keeps the live revision's consent version, so returning visitors
     aren't asked again, unless ``requires_reconsent`` gives it a new one.
+    Extensions' pre-publish checks run first and post-publish hooks after.
     """
+    for check in get_registry().pre_publish_checks:
+        reason = await check(db, site.id, action, snapshot)
+        if reason:
+            raise BlockedByCheckError(reason)
+
     revision = SiteConfigRevision(
         site_id=site.id,
         number=await _next_revision_number(db, site.id),
@@ -669,7 +693,22 @@ async def _make_live(
     await db.flush()
     site.live_revision_id = revision.id
     await db.flush()
+    await _run_post_publish_hooks(db, revision)
     return revision
+
+
+async def _run_post_publish_hooks(db: AsyncSession, revision: SiteConfigRevision) -> None:
+    """Run extensions' post-publish hooks without letting them undo the publish.
+
+    Each hook gets its own savepoint, so a failure rolls back only what
+    that hook did.
+    """
+    for hook in get_registry().post_publish_hooks:
+        try:
+            async with db.begin_nested():
+                await hook(db, revision)
+        except Exception:
+            logger.exception("Post-publish hook %r failed for revision %s", hook, revision.id)
 
 
 async def _next_revision_number(db: AsyncSession, site_id: uuid.UUID) -> int:

@@ -136,6 +136,18 @@ async def build_site_snapshot(db: AsyncSession, site_id: uuid.UUID) -> SiteSnaps
             }
         )
 
+    for provider in get_registry().config_source_providers:
+        for source in await provider(db, site_id):
+            values = source.get("values") or {}
+            sources.append(
+                {
+                    "kind": source["kind"],
+                    "id": str(source["id"]),
+                    "content_hash": content_hash(values),
+                    "values": values,
+                }
+            )
+
     return SiteSnapshot(
         snapshot=snapshot,
         site_layer=site_layer,
