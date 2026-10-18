@@ -28,6 +28,11 @@ vi.mock('../api/installation', () => ({
   checkInstallation: vi.fn(),
 }));
 
+vi.mock('../api/setup', () => ({
+  getSiteSetup: () =>
+    Promise.resolve({ steps: [], done: 6, total: 6, complete: true, dismissed: true }),
+}));
+
 vi.mock('../api/revisions', () => ({
   getDraftStatus: () =>
     Promise.resolve({

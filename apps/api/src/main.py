@@ -26,6 +26,7 @@ from src.routers import (
     scanner,
     site_group_config,
     site_groups,
+    site_setup,
     sites,
     system,
     translations,
@@ -146,6 +147,7 @@ def create_app() -> FastAPI:
     app.include_router(site_groups.router, prefix=api_prefix)
     app.include_router(site_group_config.router, prefix=api_prefix)
     app.include_router(installation.router, prefix=api_prefix)
+    app.include_router(site_setup.router, prefix=api_prefix)
     app.include_router(sites.router, prefix=api_prefix)
     app.include_router(cookies.router, prefix=api_prefix)
     app.include_router(iab_gvl.router, prefix=api_prefix)

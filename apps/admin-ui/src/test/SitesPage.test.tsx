@@ -28,6 +28,7 @@ vi.mock('../api/sites', () => ({
     Promise.resolve([
       site({}),
       site({ id: 'site-2', domain: 'new.test', display_name: 'New', live_revision_id: null }),
+      site({ id: 'site-3', domain: 'older.test', display_name: 'Older', live_revision_id: null }),
     ]),
   updateSite: vi.fn(),
 }));
@@ -37,6 +38,15 @@ vi.mock('../api/installation', () => ({
     Promise.resolve([
       { site_id: 'site-1', state: 'installed', last_seen_at: '2026-10-18T10:00:00Z' },
       { site_id: 'site-2', state: 'not_detected', last_seen_at: null },
+      { site_id: 'site-3', state: 'not_detected', last_seen_at: null },
+    ]),
+}));
+
+vi.mock('../api/setup', () => ({
+  listSetupSummaries: () =>
+    Promise.resolve([
+      { site_id: 'site-1', done: 6, total: 6, complete: true, dismissed: true },
+      { site_id: 'site-2', done: 2, total: 6, complete: false, dismissed: false },
     ]),
 }));
 
@@ -57,10 +67,11 @@ describe('SitesPage', () => {
       </QueryClientProvider>,
     );
 
+    await screen.findAllByText('Setup 2 of 6');
     // Desktop and mobile layouts each render the badge once.
-    const badges = await screen.findAllByText('Not yet published');
+    const badges = screen.getAllByText('Not yet published');
     expect(badges).toHaveLength(2);
-    expect(badges[0].closest('a')).toHaveAttribute('href', '/sites/site-2');
+    expect(badges[0].closest('a')).toHaveAttribute('href', '/sites/site-3');
   });
 
   it('shows whether the banner is installed on each site', async () => {
@@ -74,6 +85,38 @@ describe('SitesPage', () => {
     );
 
     expect(await screen.findAllByText('Installed')).toHaveLength(2);
+    expect(screen.getAllByText('Not detected')).toHaveLength(2);
+  });
+
+  it('shows setup progress for sites that are not set up yet', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SitesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const progress = await screen.findAllByText('Setup 2 of 6');
+    expect(progress).toHaveLength(2);
+    expect(progress[0].closest('a')).toHaveAttribute('href', '/sites/site-2');
+    expect(screen.queryByText('Setup 6 of 6')).not.toBeInTheDocument();
+  });
+
+  it('shows only setup progress while a site is being set up', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SitesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await screen.findAllByText('Setup 2 of 6');
+    // Only site-3, which has no setup in progress, shows these.
+    expect(screen.getAllByText('Not yet published')).toHaveLength(2);
     expect(screen.getAllByText('Not detected')).toHaveLength(2);
   });
 });

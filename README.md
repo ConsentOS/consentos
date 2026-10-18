@@ -109,7 +109,7 @@ To hold back your own third-party scripts until the visitor consents, tag them w
 
 Configuration changes go live when you publish them, and each publish is kept so you can roll back. See [docs/publishing.md](docs/publishing.md).
 
-New sites are scanned for cookies as soon as they are added. See [docs/scanning.md](docs/scanning.md).
+New sites are scanned for cookies as soon as they are added, and a checklist guides them through to a working banner. See [docs/setting-up-a-site.md](docs/setting-up-a-site.md) and [docs/scanning.md](docs/scanning.md).
 
 ### Upgrading from PostgreSQL 16
 

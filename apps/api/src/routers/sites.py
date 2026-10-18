@@ -292,7 +292,7 @@ async def update_site_config(
     Changes the draft only. Visitors see it once the site is published
     with ``POST /config/sites/{site_id}/publish``.
     """
-    await _get_org_site(site_id, current_user.organisation_id, db)
+    site = await _get_org_site(site_id, current_user.organisation_id, db)
 
     result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
     config = result.scalar_one_or_none()
@@ -305,10 +305,21 @@ async def update_site_config(
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(config, field, value)
+    _note_banner_edit(site, update_data)
 
     await db.flush()
     await db.refresh(config)
     return await _editor_response(config, current_user.organisation_id, db)
+
+
+# Saving any of these from the Banner or Categories tab counts as setting
+# up the banner, for the setup checklist.
+BANNER_FIELDS = {"banner_config", "enabled_categories"}
+
+
+def _note_banner_edit(site: Site, changed: dict) -> None:
+    if site.banner_confirmed_at is None and BANNER_FIELDS & changed.keys():
+        site.banner_confirmed_at = datetime.now(UTC)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
