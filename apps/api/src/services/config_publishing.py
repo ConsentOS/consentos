@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from src.models.publish_attempt import PublishAttempt
 from src.models.site import Site
 from src.models.site_config_revision import SiteConfigRevision
 from src.models.user import User
@@ -31,20 +33,99 @@ from src.services.config_snapshot import (
 )
 
 
-class DraftOutOfDateError(Exception):
-    """The draft changed after the publisher reviewed it."""
+class PublishError(Exception):
+    """A publish or rollback that was refused, with a reason for the user.
+
+    ``code`` is stable for clients and the attempt log; ``message`` is the
+    plain-language explanation shown in the admin UI.
+    """
+
+    code = "publish_failed"
+    message = "The publish failed. Nothing was changed."
 
 
-class NothingToPublishError(Exception):
-    """The draft is identical to the live revision."""
+class DraftOutOfDateError(PublishError):
+    code = "stale_draft"
+    message = "The draft has changed since you reviewed it. Review the changes again."
 
 
-class RevisionNotFoundError(LookupError):
-    """The revision doesn't exist or belongs to another site."""
+class NothingToPublishError(PublishError):
+    code = "nothing_to_publish"
+    message = "There are no unpublished changes"
 
 
-class AlreadyLiveError(Exception):
-    """The revision to roll back to is already live."""
+class RevisionNotFoundError(PublishError, LookupError):
+    code = "revision_not_found"
+    message = "Revision not found"
+
+
+class AlreadyLiveError(PublishError):
+    code = "already_live"
+    message = "That revision is already live"
+
+
+@dataclass(frozen=True)
+class AttemptEntry:
+    """A site's most recent publish attempt, for the overview."""
+
+    action: str
+    status: str
+    error_code: str | None
+    error_message: str | None
+    attempted_at: datetime
+    attempted_by_name: str | None
+    revision_number: int | None
+
+
+async def record_attempt(
+    db: AsyncSession,
+    site_id: uuid.UUID,
+    *,
+    action: str,
+    attempted_by: uuid.UUID | None,
+    revision: SiteConfigRevision | None = None,
+    error: PublishError | None = None,
+    batch_id: uuid.UUID | None = None,
+) -> PublishAttempt:
+    """Log one publish, rollback or bulk-publish item."""
+    attempt = PublishAttempt(
+        site_id=site_id,
+        action=action,
+        status="failed" if error else "succeeded",
+        revision_id=revision.id if revision else None,
+        error_code=error.code if error else None,
+        error_message=error.message if error else None,
+        batch_id=batch_id,
+        attempted_by=attempted_by,
+    )
+    db.add(attempt)
+    await db.flush()
+    return attempt
+
+
+async def get_last_attempt(db: AsyncSession, site_id: uuid.UUID) -> AttemptEntry | None:
+    row = (
+        await db.execute(
+            select(PublishAttempt, User.full_name, SiteConfigRevision.number)
+            .outerjoin(User, User.id == PublishAttempt.attempted_by)
+            .outerjoin(SiteConfigRevision, SiteConfigRevision.id == PublishAttempt.revision_id)
+            .where(PublishAttempt.site_id == site_id)
+            .order_by(PublishAttempt.attempted_at.desc(), PublishAttempt.id.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None
+    attempt, attempted_by_name, revision_number = row
+    return AttemptEntry(
+        action=attempt.action,
+        status=attempt.status,
+        error_code=attempt.error_code,
+        error_message=attempt.error_message,
+        attempted_at=attempt.attempted_at,
+        attempted_by_name=attempted_by_name,
+        revision_number=revision_number,
+    )
 
 
 @dataclass(frozen=True)
@@ -57,6 +138,7 @@ class DraftStatus:
     # When non-empty the publish dialog pre-ticks "Ask visitors to
     # consent again".
     reconsent_reasons: list[str]
+    last_attempt: AttemptEntry | None
 
 
 # What a visitor's consent covers, by where it sits in a snapshot. A
@@ -179,6 +261,7 @@ async def get_draft_status(db: AsyncSession, site_id: uuid.UUID) -> DraftStatus:
             changed_sources=[],
             # Nobody has consented to a site that was never published.
             reconsent_reasons=[],
+            last_attempt=await get_last_attempt(db, site_id),
         )
     return DraftStatus(
         live_revision=live,
@@ -186,6 +269,7 @@ async def get_draft_status(db: AsyncSession, site_id: uuid.UUID) -> DraftStatus:
         has_unpublished_changes=built.content_hash != live.content_hash,
         changed_sources=changed_sources(live.sources, built.sources),
         reconsent_reasons=reconsent_reasons(live.snapshot, built.snapshot),
+        last_attempt=await get_last_attempt(db, site_id),
     )
 
 

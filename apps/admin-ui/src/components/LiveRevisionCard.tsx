@@ -1,8 +1,33 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { getDraftStatus } from '../api/revisions';
+import { Alert } from './ui/alert';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
+import type { PublishAttempt } from '../types/api';
+
+const ACTION_LABELS: Record<PublishAttempt['action'], string> = {
+  publish: 'publish',
+  rollback: 'rollback',
+  bulk_publish: 'bulk publish',
+};
+
+function LastAttempt({ attempt }: { attempt: PublishAttempt }) {
+  const when = new Date(attempt.attempted_at).toLocaleString();
+  const who = attempt.attempted_by_name ? ` by ${attempt.attempted_by_name}` : '';
+  if (attempt.status === 'succeeded') {
+    return (
+      <p className="mt-2 text-xs text-text-secondary">
+        Last {ACTION_LABELS[attempt.action]} succeeded{who}, {when}.
+      </p>
+    );
+  }
+  return (
+    <Alert variant="error" className="mt-3">
+      Last {ACTION_LABELS[attempt.action]} failed{who}, {when}: {attempt.error_message}
+    </Alert>
+  );
+}
 
 interface Props {
   siteId: string;
@@ -38,6 +63,7 @@ export default function LiveRevisionCard({ siteId }: Props) {
           <span className="text-text-secondary">Visitors see the built-in defaults until you publish.</span>
         </div>
       )}
+      {data?.last_attempt && <LastAttempt attempt={data.last_attempt} />}
     </Card>
   );
 }

@@ -13,6 +13,7 @@ from src.models.iab_gvl import (
 from src.models.instance import Instance
 from src.models.org_config import OrgConfig
 from src.models.organisation import Organisation
+from src.models.publish_attempt import PublishAttempt
 from src.models.scan import ScanJob, ScanResult
 from src.models.site import Site
 from src.models.site_config import SiteConfig
@@ -39,6 +40,7 @@ __all__ = [
     "KnownCookie",
     "OrgConfig",
     "Organisation",
+    "PublishAttempt",
     "ScanJob",
     "ScanResult",
     "Site",

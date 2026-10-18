@@ -21,6 +21,7 @@ vi.mock('../api/revisions', () => ({
       has_unpublished_changes: true,
       changed_sources: [],
       reconsent_reasons: [],
+      last_attempt: null,
     }),
 }));
 
