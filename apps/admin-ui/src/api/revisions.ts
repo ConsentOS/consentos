@@ -1,5 +1,7 @@
 import apiClient from './client';
 import type {
+  AffectedSite,
+  BulkPublishResponse,
   ConfigDiff,
   DraftStatus,
   RevisionDetail,
@@ -61,6 +63,23 @@ export async function publishDraft(
 /** Put the site's own values back to the live revision. */
 export async function discardDraft(siteId: string): Promise<DraftStatus> {
   const { data } = await apiClient.post<DraftStatus>(`/config/sites/${siteId}/discard`);
+  return data;
+}
+
+/** Published sites with unpublished changes, organisation-wide or in one group. */
+export async function listAffectedSites(siteGroupId?: string): Promise<AffectedSite[]> {
+  const { data } = await apiClient.get<AffectedSite[]>('/config/affected-sites', {
+    params: siteGroupId ? { site_group_id: siteGroupId } : {},
+  });
+  return data;
+}
+
+export async function bulkPublish(body: {
+  sites: { site_id: string; expected_content_hash: string }[];
+  note: string | null;
+  ask_visitors_again: boolean;
+}): Promise<BulkPublishResponse> {
+  const { data } = await apiClient.post<BulkPublishResponse>('/config/bulk-publish', body);
   return data;
 }
 

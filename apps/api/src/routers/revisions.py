@@ -10,8 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import get_db
 from src.models.site import Site
 from src.models.site_config_revision import SiteConfigRevision
+from src.models.site_group import SiteGroup
 from src.schemas.auth import CurrentUser
 from src.schemas.revision import (
+    AffectedSiteResponse,
+    BulkPublishRequest,
+    BulkPublishResponse,
     DiffResponse,
     DraftStatusResponse,
     PublishRequest,
@@ -22,14 +26,17 @@ from src.schemas.revision import (
 )
 from src.services.config_diff import EMPTY, Version, diff_versions
 from src.services.config_publishing import (
+    AffectedSite,
     DraftStatus,
     PublishError,
     RevisionEntry,
     RevisionNotFoundError,
+    bulk_publish,
     discard_draft,
     get_draft_status,
     get_live_revision,
     get_revision,
+    list_affected_sites,
     list_revisions,
     publish_draft,
     reconsent_reasons,
@@ -99,6 +106,44 @@ async def discard(
     except PublishError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
     return await get_draft_status(db, site_id)
+
+
+@router.get("/affected-sites", response_model=list[AffectedSiteResponse])
+async def get_affected_sites(
+    site_group_id: uuid.UUID | None = None,
+    current_user: CurrentUser = Depends(_ANY_ROLE),
+    db: AsyncSession = Depends(get_db),
+) -> list[AffectedSite]:
+    """Published sites with unpublished changes, across the organisation or one group."""
+    if site_group_id is not None:
+        group = await db.get(SiteGroup, site_group_id)
+        if group is None or group.organisation_id != current_user.organisation_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Site group not found"
+            )
+    return await list_affected_sites(db, current_user.organisation_id, site_group_id=site_group_id)
+
+
+@router.post("/bulk-publish", response_model=BulkPublishResponse)
+async def bulk_publish_sites(
+    body: BulkPublishRequest,
+    current_user: CurrentUser = Depends(require_role("owner", "admin")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Publish several sites, each as its own revision. Requires admin role.
+
+    One site failing doesn't stop the others; the response gives each
+    site's revision number or the reason it failed.
+    """
+    batch_id, results = await bulk_publish(
+        db,
+        current_user.organisation_id,
+        [(item.site_id, item.expected_content_hash) for item in body.sites],
+        published_by=current_user.id,
+        note=body.note,
+        requires_reconsent=body.ask_visitors_again,
+    )
+    return {"batch_id": batch_id, "results": results}
 
 
 @router.get("/sites/{site_id}/revisions", response_model=RevisionList)

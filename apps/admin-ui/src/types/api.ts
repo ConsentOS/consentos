@@ -483,3 +483,24 @@ export interface ConfigDiff {
   changes: DiffChange[];
   reconsent_reasons: ReconsentReason[];
 }
+
+export interface AffectedSite {
+  site_id: string;
+  name: string;
+  domain: string;
+  live_number: number;
+  content_hash: string;
+  changed_sources: { kind: string; id: string }[];
+}
+
+export interface BulkPublishResult {
+  site_id: string;
+  status: 'succeeded' | 'failed';
+  revision_number: number | null;
+  error_message: string | null;
+}
+
+export interface BulkPublishResponse {
+  batch_id: string;
+  results: BulkPublishResult[];
+}

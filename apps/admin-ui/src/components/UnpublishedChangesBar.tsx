@@ -1,7 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { getDraftStatus } from '../api/revisions';
+import { useRefreshOnSave } from '../hooks/useRefreshOnSave';
 import { useAuthStore } from '../stores/auth';
 import DiscardDialog from './DiscardDialog';
 import { canPublish } from './permissions';
@@ -14,7 +15,6 @@ interface Props {
 
 /** Shown on every site tab while the draft differs from what visitors see. */
 export default function UnpublishedChangesBar({ siteId }: Props) {
-  const queryClient = useQueryClient();
   const [reviewing, setReviewing] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const { user } = useAuthStore();
@@ -23,18 +23,7 @@ export default function UnpublishedChangesBar({ siteId }: Props) {
     queryFn: () => getDraftStatus(siteId),
   });
 
-  // Any successful save on any tab may change the draft, so re-check.
-  // Saves go through many different mutations, which is why this listens
-  // to all of them rather than each tab invalidating the status itself.
-  useEffect(
-    () =>
-      queryClient.getMutationCache().subscribe((event) => {
-        if (event.type === 'updated' && event.action.type === 'success') {
-          queryClient.invalidateQueries({ queryKey: ['sites', siteId, 'draft'] });
-        }
-      }),
-    [queryClient, siteId],
-  );
+  useRefreshOnSave(['sites', siteId, 'draft']);
 
   if (!data?.has_unpublished_changes) return null;
 

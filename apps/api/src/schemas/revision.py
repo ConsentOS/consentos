@@ -109,3 +109,36 @@ class DiffResponse(BaseModel):
     reconsent_reasons: list[str]
 
     model_config = {"populate_by_name": True}
+
+
+class AffectedSiteResponse(BaseModel):
+    site_id: uuid.UUID
+    name: str
+    domain: str
+    live_number: int
+    # The draft hash to publish, as reviewed in this list.
+    content_hash: str
+    changed_sources: list[ChangedSource]
+
+
+class BulkPublishItem(BaseModel):
+    site_id: uuid.UUID
+    expected_content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class BulkPublishRequest(BaseModel):
+    sites: list[BulkPublishItem] = Field(min_length=1, max_length=500)
+    note: str | None = Field(default=None, max_length=500)
+    ask_visitors_again: bool = False
+
+
+class BulkPublishResult(BaseModel):
+    site_id: uuid.UUID
+    status: str
+    revision_number: int | None
+    error_message: str | None
+
+
+class BulkPublishResponse(BaseModel):
+    batch_id: uuid.UUID
+    results: list[BulkPublishResult]

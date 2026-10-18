@@ -678,6 +678,118 @@ class TestDiscard:
         assert (await _discard(db_client, other_org_headers, site_id)).status_code == 404
 
 
+async def _group_with_sites(client, headers, count) -> tuple[str, list[str]]:
+    group = (
+        await client.post(
+            "/api/v1/site-groups/", headers=headers, json={"name": f"G {uuid.uuid4().hex[:6]}"}
+        )
+    ).json()
+    site_ids = []
+    for _ in range(count):
+        site_id = await create_test_site(client, headers)
+        resp = await client.patch(
+            f"/api/v1/sites/{site_id}", headers=headers, json={"site_group_id": group["id"]}
+        )
+        assert resp.status_code == 200, resp.text
+        site_ids.append(site_id)
+    return group["id"], site_ids
+
+
+async def _set_group_config(client, headers, group_id, **fields):
+    resp = await client.put(f"/api/v1/site-groups/{group_id}/config", headers=headers, json=fields)
+    assert resp.status_code == 200, resp.text
+
+
+async def _affected(client, headers, group_id) -> list[dict]:
+    resp = await client.get(
+        "/api/v1/config/affected-sites", headers=headers, params={"site_group_id": group_id}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+@requires_db
+class TestBulkPublish:
+    async def test_lists_published_sites_with_changes(self, db_client, auth_headers):
+        group_id, (changed, unpublished) = await _group_with_sites(db_client, auth_headers, 2)
+        await _publish_draft(db_client, auth_headers, changed)
+        assert await _affected(db_client, auth_headers, group_id) == []
+
+        await _set_group_config(db_client, auth_headers, group_id, terms_url="https://g/t")
+
+        [site] = await _affected(db_client, auth_headers, group_id)
+        assert site["site_id"] == changed
+        assert site["live_number"] == 1
+        assert [s["kind"] for s in site["changed_sources"]] == ["site_group_config"]
+        assert (
+            site["content_hash"] == (await _draft(db_client, auth_headers, changed))["content_hash"]
+        )
+        assert unpublished not in [
+            s["site_id"] for s in await _affected(db_client, auth_headers, group_id)
+        ]
+
+    async def test_publishes_each_site_and_carries_on_past_failures(
+        self, db_client, auth_headers, other_org_headers
+    ):
+        group_id, site_ids = await _group_with_sites(db_client, auth_headers, 3)
+        for site_id in site_ids:
+            await _publish_draft(db_client, auth_headers, site_id)
+        await _set_group_config(db_client, auth_headers, group_id, terms_url="https://g/t")
+        affected = await _affected(db_client, auth_headers, group_id)
+        # One site changes again after the list was reviewed.
+        await _edit(db_client, auth_headers, site_ids[1], privacy_policy_url="https://late")
+        foreign = await create_test_site(db_client, other_org_headers)
+
+        resp = await db_client.post(
+            "/api/v1/config/bulk-publish",
+            headers=auth_headers,
+            json={
+                "sites": [
+                    {"site_id": s["site_id"], "expected_content_hash": s["content_hash"]}
+                    for s in affected
+                ]
+                + [{"site_id": foreign, "expected_content_hash": "0" * 64}],
+                "note": "New group terms",
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        results = {r["site_id"]: r for r in resp.json()["results"]}
+        assert results[site_ids[0]]["status"] == "succeeded"
+        assert results[site_ids[0]]["revision_number"] == 2
+        assert results[site_ids[2]]["status"] == "succeeded"
+        assert results[site_ids[1]]["status"] == "failed"
+        assert "changed since you reviewed it" in results[site_ids[1]]["error_message"]
+        assert results[foreign] == {
+            "site_id": foreign,
+            "status": "failed",
+            "revision_number": None,
+            "error_message": "Site not found",
+        }
+
+        published = (await _banner(db_client, site_ids[0])).json()
+        assert published["terms_url"] == "https://g/t"
+        assert (await _banner(db_client, site_ids[1])).json()["terms_url"] is None
+        history = (
+            await db_client.get(
+                f"/api/v1/config/sites/{site_ids[0]}/revisions", headers=auth_headers
+            )
+        ).json()["items"]
+        assert history[0]["note"] == "New group terms"
+        failed_attempt = (await _draft(db_client, auth_headers, site_ids[1]))["last_attempt"]
+        assert (failed_attempt["action"], failed_attempt["status"]) == ("bulk_publish", "failed")
+        assert (await _affected(db_client, auth_headers, group_id))[0]["site_id"] == site_ids[1]
+
+    async def test_other_orgs_group_is_not_found(self, db_client, auth_headers, other_org_headers):
+        group_id, _ = await _group_with_sites(db_client, auth_headers, 1)
+        resp = await db_client.get(
+            "/api/v1/config/affected-sites",
+            headers=other_org_headers,
+            params={"site_group_id": group_id},
+        )
+        assert resp.status_code == 404
+
+
 @requires_db
 class TestOrgScoping:
     async def test_other_org_cannot_see_or_publish(
