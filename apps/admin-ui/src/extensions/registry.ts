@@ -1,12 +1,10 @@
 /**
- * UI extension registry for the open-core architecture.
+ * UI extension registry.
  *
- * Provides registration hooks that allow enterprise/commercial code to
- * inject additional tabs, pages, and navigation items into the admin UI
- * without the core needing any direct knowledge of the extensions.
- *
- * In community edition (CE) mode the registry is simply empty and the
- * UI renders only the built-in tabs/pages.
+ * Lets an extension add tabs, pages and navigation items to the admin UI
+ * without core knowing anything about it. With no extension installed
+ * the registry is empty and the UI renders only the built-in tabs and
+ * pages.
  */
 
 import type { ComponentType } from 'react';
@@ -17,7 +15,7 @@ import type { ComponentType } from 'react';
 
 /** A tab injected into the site-detail page. */
 export interface TabExtension {
-  /** Unique identifier used as the tab key (e.g. ``"ee-analytics"``). */
+  /** Unique identifier used as the tab key (e.g. ``"reports"``). */
   id: string;
   /** Human-readable label shown in the tab bar. */
   label: string;
@@ -41,7 +39,7 @@ export interface SiteDetailTabProps {
 
 /** A page injected into the main router. */
 export interface PageExtension {
-  /** Route path (e.g. ``"/ee/billing"``). */
+  /** Route path (e.g. ``"/reports"``). */
   path: string;
   /** React component rendered at this route. */
   component: ComponentType;
@@ -166,22 +164,19 @@ export function getAuthUiProvider(): AuthUiProvider | null {
 /* ------------------------------------------------------------------ */
 
 /**
- * Attempt to load enterprise UI extensions.
+ * Load the extension registration module, if the build provides one.
  *
- * In the OSS repo this is a no-op.  In the cloud repo, the build
- * system replaces the virtual module ``virtual:ee-extensions`` with
- * the actual EE register module, enabling extension discovery.
+ * ``virtual:consentos-extensions`` is a no-op module in this repo's own
+ * build. A build that ships extensions resolves it to its registration
+ * code, whose side effects call the ``register*`` functions above.
  */
 export async function discoverExtensions(): Promise<void> {
   try {
-    // The virtual module is provided by the EE Vite plugin in the
-    // cloud repo.  In OSS builds the import fails and we fall through
-    // to the catch block silently.
-    const mod = await import('virtual:ee-extensions');
+    const mod = await import('virtual:consentos-extensions');
     if (mod) {
-      console.info('[CMP] Enterprise UI extensions loaded');
+      console.info('[ConsentOS] UI extensions loaded');
     }
   } catch {
-    // No EE extensions available — running in community edition mode.
+    // A failed import leaves the built-in UI in place.
   }
 }

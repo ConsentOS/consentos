@@ -12,7 +12,7 @@ What is **never** collected:
 
 What **is** collected:
 - a stable anonymous instance UUID generated locally on first boot
-- ConsentOS version, edition (CE/EE), Python version, deployment kind
+- ConsentOS version, edition label, Python version, deployment kind
 - bucketed counts of orgs/sites/users/scans/consents
 - feature flags (TCF, auto-blocking, GeoIP configured, etc.)
 - Postgres major version
@@ -158,7 +158,6 @@ async def _collect_features(
         "geoip_header_configured": settings.geoip_country_header is not None,
         "geoip_maxmind_configured": settings.geoip_maxmind_db_path is not None,
         "rate_limit_enabled": settings.rate_limit_enabled,
-        "compliance_ee": edition_name() == "ee",
     }
 
 

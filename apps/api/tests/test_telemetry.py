@@ -15,6 +15,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config.edition import edition_name
 from src.config.settings import Settings
 from src.services import telemetry
 from tests.conftest import requires_db
@@ -142,7 +143,7 @@ async def test_collect_payload_uses_buckets(_test_engine, _setup_db):
     for value in payload["counts"].values():
         assert value in {"0", "1-10", "10-100", "100-1k", "1k-10k", "10k+"}
     assert "instance_id" in payload
-    assert payload["edition"] in {"ce", "ee"}
+    assert payload["edition"] == edition_name()
 
 
 @requires_db

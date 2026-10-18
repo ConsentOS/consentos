@@ -34,7 +34,7 @@ async def _reject_when_external_provider_owns_interactive() -> None:
     """Return 501 when the registered auth provider owns interactive flows.
 
     Applied to ``/login``, ``/refresh``, ``/me/password``: routes an
-    external IdP (Clerk, Keycloak, etc.) handles itself. ``/me`` and
+    external identity provider handles itself. ``/me`` and
     ``PATCH /me`` remain available in both modes.
     """
     provider = get_registry().auth_provider

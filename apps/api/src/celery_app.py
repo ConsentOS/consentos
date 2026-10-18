@@ -4,6 +4,7 @@ Provides async-compatible scan scheduling via Celery with Redis as the
 broker and result backend.
 """
 
+import importlib
 import ssl
 
 from celery import Celery
@@ -78,26 +79,10 @@ import src.tasks.scanner  # noqa: E402
 import src.tasks.telemetry  # noqa: E402
 import src.tasks.update_check  # noqa: E402, F401
 
-try:
-    import ee.api.src.tasks.compliance_scanner
-    import ee.api.src.tasks.compliance_scoring
-    import ee.api.src.tasks.retention  # noqa: F401
+# Installed extensions contribute their own task modules and beat entries.
+from src.extensions.registry import discover_extensions, get_registry  # noqa: E402
 
-    app.conf.beat_schedule.update(
-        {
-            "check-scheduled-compliance-scans": {
-                "task": "src.tasks.compliance_scanner.check_scheduled_compliance_scans",
-                "schedule": crontab(hour="3", minute="0"),
-            },
-            "compute-daily-compliance-scores": {
-                "task": "src.tasks.compliance_scoring.compute_daily_scores",
-                "schedule": crontab(hour="4", minute="0"),
-            },
-            "run-retention-purge": {
-                "task": "src.tasks.retention.run_retention_purge",
-                "schedule": crontab(hour="2", minute="0"),
-            },
-        }
-    )
-except ImportError:
-    pass
+discover_extensions()
+for _module in get_registry().task_modules:
+    importlib.import_module(_module)
+app.conf.beat_schedule.update(get_registry().periodic_tasks)

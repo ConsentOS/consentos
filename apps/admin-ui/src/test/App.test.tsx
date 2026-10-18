@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import * as registry from '../extensions/registry';
 
-// Mock extension discovery to avoid loading EE modules in tests
+// Mock extension discovery so tests never load extension modules
 vi.mock('../extensions/registry', () => ({
   discoverExtensions: vi.fn(() => Promise.resolve()),
   getSiteDetailTabs: vi.fn(() => []),

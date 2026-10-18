@@ -34,8 +34,7 @@ Every payload looks like this:
     "scanner_scheduled_sites": "1-10",
     "geoip_header_configured": true,
     "geoip_maxmind_configured": false,
-    "rate_limit_enabled": true,
-    "compliance_ee": false
+    "rate_limit_enabled": true
   },
   "stack": {
     "postgres_version": "16.2",
@@ -52,7 +51,7 @@ Every payload looks like this:
 | `instance_id` | Random UUID generated locally on first boot, stored in the `instance` table. Identifies the install, never a person. Wipe the row to rotate. |
 | `sent_at` | ISO 8601 UTC timestamp of the send. |
 | `version` | ConsentOS API version (`app_version`). |
-| `edition` | `"ce"` (community) or `"ee"` (enterprise). |
+| `edition` | `"ce"`, unless an installed extension sets its own label. |
 | `python_version` | Runtime Python version, e.g. `3.12.7`. |
 | `platform` | `sys.platform` — `linux`, `darwin`, etc. |
 | `deployment` | Operator-supplied label from `CONSENTOS_DEPLOYMENT`. Defaults to `unknown`. |

@@ -1,10 +1,9 @@
 """Pluggable authentication provider abstraction.
 
 Core ships ``PgAuthProvider`` which verifies JWTs issued by ConsentOS
-against the local users table. Enterprise extensions can register an
-alternative provider (e.g. Clerk, Keycloak, FusionAuth) via
-``extensions.registry.register_auth_provider`` to delegate authentication
-to a hosted or self-hosted IdP.
+against the local users table. An extension can register an alternative
+provider via ``extensions.registry.register_auth_provider`` to delegate
+authentication to an external identity provider.
 
 A provider that owns interactive endpoints (login, refresh, register,
 password change) also disables the core ``/api/v1/auth/*`` routes for

@@ -4,9 +4,6 @@
  * Loaded async by consent-loader.js when no existing consent is found.
  * Fetches site config, renders the banner, handles user interaction,
  * records consent via the API.
- *
- * Enterprise features (A/B testing, GPP, GPC, profile sync, Shopify,
- * re-consent) are loaded via the EE banner extension module when present.
  */
 
 import { announce, createLiveRegion, focusFirst, onEscape, prefersReducedMotion, trapFocus } from './a11y';
@@ -22,6 +19,9 @@ import { isImplicitConsentMode } from './blocking-mode';
 import { buildConsentState, readConsent, writeConsent, writeTcfCookie } from './consent';
 import { renderCookiesWidget } from './cookies-widget';
 import { buildGcmStateFromCategories, updateGcm } from './gcm';
+import { type GpcResult, evaluateGpc, getVisitorRegion } from './gpc';
+import { installGppApi, isGppApiInstalled, setGppDisplayStatus, updateGppConsent } from './gpp-api';
+import { buildGppFromConsent } from './gpp-consent';
 import { escapeHtml, isValidColour, isValidFontFamily } from './html';
 import { type TranslationStrings, DEFAULT_TRANSLATIONS, detectLocale, interpolate, renderLinks, selectTranslations } from './i18n';
 import {
@@ -30,6 +30,8 @@ import {
   setTcfDisplayStatus,
   updateTcfConsent,
 } from './tcf';
+import { needsReconsent } from './reconsent';
+import { updateShopifyConsent } from './shopify';
 import type { TCModel } from './tcf';
 import type { BannerConfig, ButtonConfig, CategorySlug, ConsentState, SiteConfig } from './types';
 
@@ -63,68 +65,6 @@ export function updateAcceptedCategories(accepted: CategorySlug[]): void {
  * single entry point keeps the behaviour consistent.
  */
 let _openPreferences: (() => void) | null = null;
-
-// -- EE extension hooks (no-ops in CE mode) ---------------------------------
-
-/** Result from the A/B test assignment. */
-interface ABAssignment {
-  abTestId: string;
-  variantId: string;
-  variant: { name: string };
-}
-
-/** Result from GPC evaluation. */
-interface GpcResult {
-  detected: boolean;
-  honoured: boolean;
-}
-
-/** EE hooks that enterprise code can override at runtime. */
-interface EEHooks {
-  applyABTest: (config: SiteConfig, visitorId: string) => { config: SiteConfig; assignment: ABAssignment | null };
-  needsReconsent: (consent: unknown, config: SiteConfig) => { required: boolean; reasons: string[] };
-  evaluateGpc: (config: SiteConfig, region: string | null) => GpcResult;
-  getVisitorRegion: () => string | null;
-  installGppApi: (cmpId: number, supportedApis: string[]) => void;
-  setGppDisplayStatus: (status: string) => void;
-  isGppApiInstalled: () => boolean;
-  updateGppConsent: (gpp: unknown) => string | undefined;
-  buildGppFromConsent: ((accepted: CategorySlug[], config: SiteConfig) => unknown) | null;
-  identifyUser: (jwt: string, config: SiteConfig) => Promise<string[]>;
-  clearIdentity: () => void;
-  isIdentified: () => boolean;
-  pushConsentToServer: (accepted: CategorySlug[], rejected: CategorySlug[], tc?: string, gpp?: string, gcm?: Record<string, string>) => void;
-  updateShopifyConsent: (accepted: CategorySlug[]) => void;
-}
-
-/** Default no-op hooks for CE mode. */
-const _hooks: EEHooks = {
-  applyABTest: (config) => ({ config, assignment: null }),
-  needsReconsent: () => ({ required: false, reasons: [] }),
-  evaluateGpc: () => ({ detected: false, honoured: false }),
-  getVisitorRegion: () => null,
-  installGppApi: () => {},
-  setGppDisplayStatus: () => {},
-  isGppApiInstalled: () => false,
-  updateGppConsent: () => undefined,
-  buildGppFromConsent: null,
-  identifyUser: async () => [],
-  clearIdentity: () => {},
-  isIdentified: () => false,
-  pushConsentToServer: () => {},
-  updateShopifyConsent: () => {},
-};
-
-/**
- * Register EE hooks. Called by the EE banner extension module.
- * Exposed on `window.__consentos_hooks` for the EE bundle to call.
- */
-export function registerEEHooks(hooks: Partial<EEHooks>): void {
-  Object.assign(_hooks, hooks);
-}
-
-// Expose for EE bundle
-(window as any).__consentos_register_ee = registerEEHooks;
 
 /**
  * Every known category, in canonical display order. Used as the
@@ -225,7 +165,7 @@ async function init(): Promise<void> {
   // visitor's translation rather than every locale the site has.
   const locale = detectLocale();
 
-  // Fetch site config — declared with let as A/B testing may replace it
+  // Fetch site config
   let config: SiteConfig;
   try {
     const resp = await fetch(
@@ -238,16 +178,7 @@ async function init(): Promise<void> {
     config = buildDefaultConfig(siteId);
   }
 
-  // Apply A/B test variant assignment (modifies banner_config if applicable)
   const existingConsent = readConsent();
-  const visitorId = existingConsent?.visitorId ?? crypto.randomUUID?.() ?? String(Date.now());
-  const abResult = _hooks.applyABTest(config, visitorId);
-  config = abResult.config;
-  const abAssignment = abResult.assignment;
-
-  if (abAssignment) {
-    console.info(`[ConsentOS] A/B test assigned: variant "${abAssignment.variant.name}"`);
-  }
 
   // Check if existing consent needs re-consent. We still load
   // translations and install the floating button even when no banner
@@ -256,7 +187,7 @@ async function init(): Promise<void> {
   // giving consent).
   let reconsentRequired = false;
   if (existingConsent) {
-    const reconsent = _hooks.needsReconsent(existingConsent, config);
+    const reconsent = needsReconsent(existingConsent, config);
     reconsentRequired = reconsent.required;
     if (reconsent.required) {
       console.info('[ConsentOS] Re-consent required:', reconsent.reasons.join(', '));
@@ -265,8 +196,8 @@ async function init(): Promise<void> {
 
   // Install GPP API if enabled
   if (config.gpp_enabled) {
-    _hooks.installGppApi(0, config.gpp_supported_apis ?? []);
-    _hooks.setGppDisplayStatus('visible');
+    installGppApi(0, config.gpp_supported_apis ?? []);
+    setGppDisplayStatus('visible');
   }
 
   // Install __tcfapi (locator iframe + postMessage proxy + global)
@@ -277,9 +208,9 @@ async function init(): Promise<void> {
     installTcfApi(PLACEHOLDER_CMP_ID, CMP_VERSION);
   }
 
-  // Evaluate GPC signal
-  const visitorRegion = _hooks.getVisitorRegion();
-  const gpcResult = _hooks.evaluateGpc(config, visitorRegion);
+  // Evaluate GPC signal against the region the API resolved for this visitor
+  const visitorRegion = config.detected_region ?? getVisitorRegion();
+  const gpcResult = evaluateGpc(config, visitorRegion);
 
   if (gpcResult.detected) {
     console.info(`[ConsentOS] GPC signal detected (honoured: ${gpcResult.honoured})`);
@@ -288,7 +219,7 @@ async function init(): Promise<void> {
   // Merge the locale strings returned with the config over the defaults.
   const t = selectTranslations(config.translations, locale);
 
-  installCmpApi(config, t, gpcResult, abAssignment);
+  installCmpApi(config, t, gpcResult);
 
   if (document.querySelector('[data-consentos-cookies]')) {
     window.ConsentOS.renderCookies();
@@ -306,7 +237,6 @@ async function init(): Promise<void> {
       config,
       t,
       gpcResult,
-      abAssignment,
       {
         prefillCategories: current?.accepted ?? null,
         showCategoriesInitially: true,
@@ -340,7 +270,6 @@ async function init(): Promise<void> {
       config,
       t,
       gpcResult,
-      abAssignment,
       {
         prefillCategories: enabled,
         showCategoriesInitially: false,
@@ -365,7 +294,9 @@ async function init(): Promise<void> {
       if (config.gcm_enabled) {
         updateGcm(gcmState);
       }
-      writeConsent(bridgeConsent, config.consent_expiry_days);
+      // Stamp this site's config version, or re-consent would treat the
+      // other site's version as a change and show the banner again.
+      writeConsent({ ...bridgeConsent, configVersion: config.id }, config.consent_expiry_days);
       dispatchConsentEvent(bridgeConsent.accepted);
       showPreferencesButton(config, t);
       return;
@@ -373,21 +304,16 @@ async function init(): Promise<void> {
   }
 
   // First-visit or re-consent: render the banner itself.
-  renderBanner(config, t, gpcResult, abAssignment);
+  renderBanner(config, t, gpcResult);
 }
 
 /**
  * Install the real window.ConsentOS API, replacing the loader stubs.
- *
- * `identifyUser(jwt)` syncs consent with the server. If the server profile
- * fully covers all categories, the banner is suppressed. If categories are
- * missing, only those categories need consent from the user.
  */
 function installCmpApi(
   config: SiteConfig,
   t: TranslationStrings,
   gpcResult?: GpcResult,
-  abAssignment?: ABAssignment | null,
 ): void {
   const enabled = resolveEnabledCategories(config);
   const nonEssential = nonEssentialFor(enabled);
@@ -439,12 +365,6 @@ function installCmpApi(
     isCategoryAccepted: (category: string): boolean => {
       return ((readConsent()?.accepted ?? ['necessary']) as string[]).includes(category);
     },
-    identifyUser: async (jwt: string): Promise<string[]> => {
-      return _hooks.identifyUser(jwt, config);
-    },
-    clearIdentity: (): void => {
-      _hooks.clearIdentity();
-    },
     renderCookies: async (target?: string | HTMLElement): Promise<void> => {
       const { siteId, apiBase } = window.__consentos;
       const current = (readConsent()?.accepted ?? ['necessary']) as CategorySlug[];
@@ -455,7 +375,7 @@ function installCmpApi(
         t,
         currentAccepted: current,
         onSave: (accepted, rejected) => {
-          handleConsent(accepted, rejected, config, gpcResult, abAssignment, t);
+          handleConsent(accepted, rejected, config, gpcResult, t);
         },
       });
     },
@@ -483,7 +403,6 @@ function buildDefaultConfig(siteId: string): SiteConfig {
     terms_url: null,
     consent_expiry_days: 365,
     consent_group_id: null,
-    ab_test: null,
     initiator_map: null,
     enabled_categories: [...ALL_CATEGORIES],
   };
@@ -519,7 +438,6 @@ export function renderBanner(
   config: SiteConfig,
   t: TranslationStrings,
   gpcResult?: GpcResult,
-  abAssignment?: ABAssignment | null,
   openOptions?: OpenOptions,
   trigger: BannerShownTrigger = 'initial',
 ): void {
@@ -608,7 +526,7 @@ export function renderBanner(
   const dismissRejected: CategorySlug[] = implicit ? [] : nonEssential;
 
   const cleanupEscape = onEscape(banner, () => {
-    handleConsent(dismissAccepted, dismissRejected, config, gpcResult, abAssignment, t);
+    handleConsent(dismissAccepted, dismissRejected, config, gpcResult, t);
     removeBanner(host, 'dismissed', cleanupFocusTrap, cleanupEscape);
     showPreferencesButton(config, t);
   });
@@ -619,11 +537,11 @@ export function renderBanner(
       if (action === 'accept') {
         // Explicit Accept All overrides GPC — user choice takes precedence.
         // "All" only includes the categories the operator has enabled.
-        handleConsent([...enabledCategories], [], config, gpcResult, abAssignment, t);
+        handleConsent([...enabledCategories], [], config, gpcResult, t);
         removeBanner(host, 'accept-all', cleanupFocusTrap, cleanupEscape);
         showPreferencesButton(config, t);
       } else if (action === 'reject') {
-        handleConsent(['necessary'], nonEssential, config, gpcResult, abAssignment, t);
+        handleConsent(['necessary'], nonEssential, config, gpcResult, t);
         removeBanner(host, 'reject-all', cleanupFocusTrap, cleanupEscape);
         showPreferencesButton(config, t);
       } else if (action === 'settings') {
@@ -634,7 +552,7 @@ export function renderBanner(
       } else if (action === 'save') {
         const accepted = getSelectedCategories(shadow);
         const rejected = nonEssential.filter((c) => !accepted.includes(c));
-        handleConsent(accepted, rejected, config, gpcResult, abAssignment, t);
+        handleConsent(accepted, rejected, config, gpcResult, t);
         removeBanner(host, 'save-preferences', cleanupFocusTrap, cleanupEscape);
         showPreferencesButton(config, t);
       }
@@ -706,7 +624,6 @@ function handleConsent(
   rejected: CategorySlug[],
   config: SiteConfig,
   gpcResult?: GpcResult,
-  abAssignment?: ABAssignment | null,
   t?: TranslationStrings,
 ): void {
   const existing = readConsent();
@@ -714,10 +631,10 @@ function handleConsent(
 
   // Generate GPP string if GPP is enabled
   let gppString: string | undefined;
-  if (config.gpp_enabled && _hooks.isGppApiInstalled() && _hooks.buildGppFromConsent) {
-    const gpp = _hooks.buildGppFromConsent(accepted, config);
-    gppString = _hooks.updateGppConsent(gpp);
-    _hooks.setGppDisplayStatus('hidden');
+  if (config.gpp_enabled && isGppApiInstalled()) {
+    const gpp = buildGppFromConsent(accepted, config.gpp_supported_apis ?? [], gpcResult?.detected ?? false);
+    gppString = updateGppConsent(gpp);
+    setGppDisplayStatus('hidden');
   }
 
   // Generate TCF v2.3 TC string + emit ``useractioncomplete`` event
@@ -765,7 +682,7 @@ function handleConsent(
 
   // Update Shopify Customer Privacy API
   if (config.shopify_privacy_enabled) {
-    _hooks.updateShopifyConsent(accepted);
+    updateShopifyConsent(accepted);
   }
 
   // Post consent to API (fire and forget)
@@ -782,16 +699,10 @@ function handleConsent(
       gcm_state: gcmState,
       gpc_detected: gpcResult?.detected ?? false,
       gpc_honoured: gpcResult?.honoured ?? false,
+      gpp_string: gppString ?? null,
       page_url: window.location.href,
-      ab_test_id: abAssignment?.abTestId ?? null,
-      ab_variant_id: abAssignment?.variantId ?? null,
     }),
   }).catch((err) => console.warn('[ConsentOS] Failed to record consent:', err));
-
-  // Push to server if user is identified (non-blocking background sync)
-  if (_hooks.isIdentified()) {
-    _hooks.pushConsentToServer(accepted, rejected, undefined, gppString, gcmState);
-  }
 
   // Dispatch event
   document.dispatchEvent(

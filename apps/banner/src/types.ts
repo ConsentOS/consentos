@@ -32,38 +32,6 @@ export interface ConsentState {
   gpcHonoured?: boolean;
 }
 
-/** Server-side consent profile returned by the sync API. */
-export interface ServerConsentProfile {
-  id: string;
-  org_id: string;
-  consent_group_id: string | null;
-  user_identifier: string;
-  categories_consented: string[];
-  categories_rejected: string[];
-  tc_string: string | null;
-  gpp_string: string | null;
-  gcm_state: Record<string, 'granted' | 'denied'> | null;
-  last_updated_at: string;
-  last_site_id: string | null;
-  created_at: string;
-}
-
-/** A/B test variant as delivered in site config. */
-export interface ABTestVariant {
-  id: string;
-  name: string;
-  traffic_percentage: number;
-  banner_config_override: Partial<BannerConfig> | null;
-  is_control: boolean;
-}
-
-/** Active A/B test data included in site config. */
-export interface ABTestConfig {
-  id: string;
-  name: string;
-  variants: ABTestVariant[];
-}
-
 /** Site configuration fetched from the API/CDN. */
 export interface SiteConfig {
   id: string;
@@ -91,8 +59,6 @@ export interface SiteConfig {
   consent_expiry_days: number;
   /** Consent group ID for cross-domain sync (null if not in a group). */
   consent_group_id: string | null;
-  /** Active A/B test (null if none running). */
-  ab_test: ABTestConfig | null;
   /** Initiator map: root script URL → category for root-level blocking. */
   initiator_map: InitiatorMapping[] | null;
   /**
@@ -123,6 +89,8 @@ export interface SiteConfig {
   category_tcf_purposes?: Record<string, number[]>;
   /** Bridge origin for cross-domain consent (e.g. ``https://cmp.consentos.dev``). */
   consent_bridge_url?: string | null;
+  /** Visitor region resolved by the API from GeoIP (e.g. ``US-CA``). */
+  detected_region?: string | null;
   /**
    * Banner translation strings keyed by locale (e.g.
    * ``{ de: { title: 'Wir verwenden Cookies', … } }``), embedded in the

@@ -2,19 +2,19 @@
 import path from 'path';
 import { defineConfig } from 'vite';
 
-/** No-op virtual module for EE extensions (see vite.config.ts for details). */
-function eeExtensions() {
-  const virtualModuleId = 'virtual:ee-extensions'
+/** No-op virtual module for extensions (see vite.config.ts for details). */
+function extensions() {
+  const virtualModuleId = 'virtual:consentos-extensions'
   const resolvedId = '\0' + virtualModuleId
   return {
-    name: 'ee-extensions',
+    name: 'consentos-extensions',
     resolveId(id: string) { if (id === virtualModuleId) return resolvedId },
     load(id: string) { if (id === resolvedId) return 'export default undefined;' },
   }
 }
 
 export default defineConfig({
-  plugins: [eeExtensions()],
+  plugins: [extensions()],
   test: {
     globals: true,
     environment: 'jsdom',

@@ -126,7 +126,7 @@ class TestGetCurrentUserDelegation:
 
 
 class TestInteractiveEndpointsGuard:
-    """When an EE provider owns interactive endpoints, core routes return 501."""
+    """When a registered provider owns interactive endpoints, core routes return 501."""
 
     def _register(self, provider: AuthProvider) -> None:
         from src.extensions.registry import register_auth_provider

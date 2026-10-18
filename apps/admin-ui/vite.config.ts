@@ -4,18 +4,18 @@ import path from 'path'
 import { defineConfig } from 'vite'
 
 /**
- * Vite plugin that provides a no-op ``virtual:ee-extensions`` module.
+ * Vite plugin that provides a no-op ``virtual:consentos-extensions`` module.
  *
- * In the cloud repo this plugin is replaced with one that points to
- * the real EE register module.  In the OSS repo the virtual module
- * simply exports nothing, making ``discoverExtensions()`` a no-op.
+ * A build that ships extensions replaces this plugin with one that
+ * resolves the module to its own registration code. Here it exports
+ * nothing, so ``discoverExtensions()`` does nothing.
  */
-function eeExtensions() {
-  const virtualModuleId = 'virtual:ee-extensions'
+function extensions() {
+  const virtualModuleId = 'virtual:consentos-extensions'
   const resolvedId = '\0' + virtualModuleId
 
   return {
-    name: 'ee-extensions',
+    name: 'consentos-extensions',
     resolveId(id: string) {
       if (id === virtualModuleId) return resolvedId
     },
@@ -26,7 +26,7 @@ function eeExtensions() {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), eeExtensions()],
+  plugins: [react(), tailwindcss(), extensions()],
   resolve: {
     alias: {
       '@core': path.resolve(__dirname, 'src'),

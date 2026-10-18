@@ -1,5 +1,7 @@
 import pytest
 
+from src.config.edition import edition_name
+
 
 @pytest.mark.asyncio
 async def test_health_endpoint(client):
@@ -7,7 +9,7 @@ async def test_health_endpoint(client):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ok"
-    assert data["edition"] in ("ce", "ee")
+    assert data["edition"] == edition_name()
 
 
 @pytest.mark.asyncio

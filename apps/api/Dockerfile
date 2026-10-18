@@ -43,9 +43,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Start the server. Database migrations and the initial-admin
-# bootstrap are owned by a separate init container (see the OSS
-# docker-compose in consentos-deployment) — the API assumes the
-# schema is ready by the time it starts.
+# bootstrap are owned by a separate init container (see
+# docker-compose.prod.yml) — the API assumes the schema is ready by the
+# time it starts.
 # Workers configurable via WEB_CONCURRENCY (default 4, use 1 for 256MB RAM)
 CMD ["sh", "-c", "uvicorn src.main:app \
     --host 0.0.0.0 \

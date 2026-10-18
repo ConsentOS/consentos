@@ -155,7 +155,7 @@ def create_app() -> FastAPI:
     # Hosted pages (no api_prefix — public pages at /c/<site_id>/cookies)
     app.include_router(hosted_pages.router)
 
-    # Discover and mount enterprise extensions (no-op in CE mode)
+    # Mount anything installed extensions registered
     discover_extensions()
     registry = get_registry()
     registry.apply(app)

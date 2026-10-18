@@ -60,10 +60,6 @@ declare global {
       getAcceptedCategories: () => string[];
       /** Check whether a specific category is currently accepted. */
       isCategoryAccepted: (category: string) => boolean;
-      /** Identify a user by JWT for server-side consent sync. */
-      identifyUser: (jwt: string) => Promise<string[]>;
-      /** Clear the identified user session. */
-      clearIdentity: () => void;
       /**
        * Render the cookies management widget into the given target.
        * Defaults to ``[data-consentos-cookies]``. Used on a site's
@@ -117,8 +113,6 @@ declare global {
     toggleCategory: _stub('toggleCategory'),
     getAcceptedCategories: () => (readConsent()?.accepted ?? ['necessary']) as string[],
     isCategoryAccepted: (cat: string) => ((readConsent()?.accepted ?? ['necessary']) as string[]).includes(cat),
-    identifyUser: async () => { console.warn('[ConsentOS] identifyUser called before bundle loaded'); return []; },
-    clearIdentity: _stub('clearIdentity'),
     renderCookies: async () => { console.warn('[ConsentOS] renderCookies called before bundle loaded'); },
   };
 

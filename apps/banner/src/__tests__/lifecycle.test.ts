@@ -153,14 +153,14 @@ describe('banner-shown event', () => {
 
   it('passes "sdk" when re-opened via the preferences flow', () => {
     const { events } = withListener('consentos:banner-shown', () => {
-      renderBanner(makeConfig(), T, undefined, null, undefined, 'sdk');
+      renderBanner(makeConfig(), T, undefined, undefined, 'sdk');
     });
     expect(events[0].detail).toEqual({ trigger: 'sdk' });
   });
 
   it('passes "implicit" for opt-out / informational auto-render', () => {
     const { events } = withListener('consentos:banner-shown', () => {
-      renderBanner(makeConfig(), T, undefined, null, undefined, 'implicit');
+      renderBanner(makeConfig(), T, undefined, undefined, 'implicit');
     });
     expect(events[0].detail).toEqual({ trigger: 'implicit' });
   });

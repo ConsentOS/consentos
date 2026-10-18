@@ -67,19 +67,19 @@ describe('UI extension registry', () => {
     it('returns registered pages', () => {
       const FakeComponent = () => null;
       registry.registerPage({
-        path: '/ee/billing',
+        path: '/reports',
         component: FakeComponent,
       });
 
       const pages = registry.getPages();
       expect(pages).toHaveLength(1);
-      expect(pages[0].path).toBe('/ee/billing');
+      expect(pages[0].path).toBe('/reports');
     });
 
     it('does not register duplicate paths', () => {
       const FakeComponent = () => null;
-      registry.registerPage({ path: '/ee/billing', component: FakeComponent });
-      registry.registerPage({ path: '/ee/billing', component: FakeComponent });
+      registry.registerPage({ path: '/reports', component: FakeComponent });
+      registry.registerPage({ path: '/reports', component: FakeComponent });
 
       expect(registry.getPages()).toHaveLength(1);
     });
@@ -91,8 +91,8 @@ describe('UI extension registry', () => {
     });
 
     it('returns registered nav items sorted by order', () => {
-      registry.registerNavItem({ path: '/ee/b', label: 'B', order: 300 });
-      registry.registerNavItem({ path: '/ee/a', label: 'A', order: 200 });
+      registry.registerNavItem({ path: '/b', label: 'B', order: 300 });
+      registry.registerNavItem({ path: '/a', label: 'A', order: 200 });
 
       const items = registry.getNavItems();
       expect(items).toHaveLength(2);
@@ -101,8 +101,8 @@ describe('UI extension registry', () => {
     });
 
     it('does not register duplicate paths', () => {
-      registry.registerNavItem({ path: '/ee/a', label: 'A' });
-      registry.registerNavItem({ path: '/ee/a', label: 'A2' });
+      registry.registerNavItem({ path: '/a', label: 'A' });
+      registry.registerNavItem({ path: '/a', label: 'A2' });
 
       expect(registry.getNavItems()).toHaveLength(1);
     });
@@ -123,7 +123,7 @@ describe('UI extension registry', () => {
   describe('discoverExtensions', () => {
     it('does not throw and is callable', () => {
       // discoverExtensions uses import.meta.glob which is Vite-specific.
-      // In the test environment the EE module may not fully resolve, so
+      // In the test environment the extension module may not resolve, so
       // we verify the function exists and is callable rather than
       // executing the full dynamic import chain.
       expect(typeof registry.discoverExtensions).toBe('function');

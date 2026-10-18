@@ -63,7 +63,7 @@ async def record_consent(
     await db.flush()
     await db.refresh(record)
 
-    # Invoke any registered post-record hooks (EE consent receipts, etc.)
+    # Invoke any post-record hooks extensions registered
     for hook in get_registry().consent_record_hooks:
         await hook(db, record)
 

@@ -61,15 +61,14 @@ export function isGpcEnabled(): boolean {
 // ── Region detection ─────────────────────────────────────────────────
 
 /**
- * Detect the visitor's region from the CMP context.
+ * Read a visitor region set on the page's ConsentOS context.
  *
- * Uses the `__cmp.visitorRegion` field, which is set by the loader
- * from GeoIP headers (e.g. Cloudflare's `CF-IPCountry` + `CF-Region`)
- * or from a GeoIP API call.
+ * A fallback for when the API resolved no region: an integrator can set
+ * ``window.__consentos.visitorRegion`` before the banner runs.
  */
 export function getVisitorRegion(): string | null {
   if (typeof window === 'undefined') return null;
-  return (window as { __cmp?: { visitorRegion?: string } }).__cmp?.visitorRegion ?? null;
+  return (window as { __consentos?: { visitorRegion?: string } }).__consentos?.visitorRegion ?? null;
 }
 
 // ── Jurisdiction check ───────────────────────────────────────────────
