@@ -408,3 +408,38 @@ export interface VersionInfo {
   latest: string | null;
   update_available: boolean;
 }
+
+// ── Config revisions ─────────────────────────────────────────────────
+
+export interface RevisionSummary {
+  id: string;
+  number: number;
+  content_hash: string;
+  consent_version: string;
+  requires_reconsent: boolean;
+  note: string | null;
+  published_by: string | null;
+  published_at: string;
+}
+
+export interface RevisionListItem extends RevisionSummary {
+  is_live: boolean;
+  published_by_name: string | null;
+  rolled_back_from_id: string | null;
+  rolled_back_from_number: number | null;
+}
+
+export interface RevisionList {
+  items: RevisionListItem[];
+  total: number;
+}
+
+export type ReconsentReason = 'categories' | 'purposes' | 'vendors';
+
+export interface DraftStatus {
+  live_revision: RevisionSummary | null;
+  content_hash: string;
+  has_unpublished_changes: boolean;
+  changed_sources: { kind: string; id: string }[];
+  reconsent_reasons: ReconsentReason[];
+}

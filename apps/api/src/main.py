@@ -21,6 +21,7 @@ from src.routers import (
     iab_gvl,
     org_config,
     organisations,
+    revisions,
     scanner,
     site_group_config,
     site_groups,
@@ -134,6 +135,7 @@ def create_app() -> FastAPI:
     api_prefix = "/api/v1"
     app.include_router(auth.router, prefix=api_prefix)
     app.include_router(config.router, prefix=api_prefix)
+    app.include_router(revisions.router, prefix=api_prefix)
     app.include_router(consent.router, prefix=api_prefix)
     app.include_router(scanner.router, prefix=api_prefix)
     app.include_router(compliance.router, prefix=api_prefix)

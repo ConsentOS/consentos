@@ -19,9 +19,11 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from src.models.site import Site
 from src.models.site_config_revision import SiteConfigRevision
+from src.models.user import User
 from src.services.config_snapshot import (
     SiteNotFoundError,
     build_site_snapshot,
@@ -70,6 +72,77 @@ def reconsent_reasons(live: dict[str, Any], draft: dict[str, Any]) -> list[str]:
         for reason, (section, key) in _CONSENT_SCOPE.items()
         if scoped(live, section, key) != scoped(draft, section, key)
     ]
+
+
+@dataclass(frozen=True)
+class RevisionEntry:
+    """A revision as History shows it."""
+
+    revision: SiteConfigRevision
+    is_live: bool
+    published_by_name: str | None
+    rolled_back_from_number: int | None
+
+
+async def list_revisions(
+    db: AsyncSession, site_id: uuid.UUID, *, limit: int, offset: int
+) -> tuple[list[RevisionEntry], int]:
+    """A page of the site's revisions, newest first, and the total count."""
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(SiteConfigRevision)
+            .where(SiteConfigRevision.site_id == site_id)
+        )
+    ).scalar_one()
+    rows = (
+        await db.execute(
+            _revision_entries(site_id)
+            .order_by(SiteConfigRevision.number.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    ).all()
+    return [_entry(*row) for row in rows], total
+
+
+async def get_revision(
+    db: AsyncSession, site_id: uuid.UUID, revision_id: uuid.UUID
+) -> RevisionEntry | None:
+    row = (
+        await db.execute(_revision_entries(site_id).where(SiteConfigRevision.id == revision_id))
+    ).first()
+    return _entry(*row) if row else None
+
+
+def _revision_entries(site_id: uuid.UUID):
+    source = aliased(SiteConfigRevision)
+    return (
+        select(
+            SiteConfigRevision,
+            Site.live_revision_id,
+            User.full_name,
+            source.number,
+        )
+        .join(Site, Site.id == SiteConfigRevision.site_id)
+        .outerjoin(User, User.id == SiteConfigRevision.published_by)
+        .outerjoin(source, source.id == SiteConfigRevision.rolled_back_from_id)
+        .where(SiteConfigRevision.site_id == site_id)
+    )
+
+
+def _entry(
+    revision: SiteConfigRevision,
+    live_revision_id: uuid.UUID | None,
+    published_by_name: str | None,
+    rolled_back_from_number: int | None,
+) -> RevisionEntry:
+    return RevisionEntry(
+        revision=revision,
+        is_live=revision.id == live_revision_id,
+        published_by_name=published_by_name,
+        rolled_back_from_number=rolled_back_from_number,
+    )
 
 
 async def get_live_revision(db: AsyncSession, site_id: uuid.UUID) -> SiteConfigRevision | None:

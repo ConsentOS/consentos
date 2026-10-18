@@ -11,7 +11,6 @@ from src.models.site_config import SiteConfig
 from src.models.site_config_revision import SiteConfigRevision
 from src.schemas.auth import CurrentUser
 from src.schemas.cookie import ReviewStatus
-from src.schemas.revision import DraftStatusResponse, PublishRequest, RevisionSummary
 from src.schemas.site import SiteConfigResponse
 from src.services.config_layers import (
     get_site_group_id,
@@ -19,20 +18,13 @@ from src.services.config_layers import (
     load_group_defaults,
     load_org_defaults,
 )
-from src.services.config_publishing import (
-    DraftOutOfDateError,
-    DraftStatus,
-    NothingToPublishError,
-    get_draft_status,
-    get_live_revision,
-    publish_draft,
-)
+from src.services.config_publishing import get_live_revision
 from src.services.config_resolver import (
     CONFIG_FIELDS,
     orm_to_config_dict,
     resolve_config,
 )
-from src.services.config_snapshot import SiteNotFoundError, render_public_config
+from src.services.config_snapshot import render_public_config
 from src.services.dependencies import require_role
 from src.services.geoip import detect_region
 
@@ -358,63 +350,3 @@ async def get_config_inheritance(
         "site_group_id": str(group_id) if group_id else None,
         "fields": sources,
     }
-
-
-@router.get("/sites/{site_id}/draft", response_model=DraftStatusResponse)
-async def get_draft(
-    site_id: uuid.UUID,
-    current_user: CurrentUser = Depends(require_role("owner", "admin", "editor", "viewer")),
-    db: AsyncSession = Depends(get_db),
-) -> DraftStatus:
-    """Whether the site has unpublished changes, and the hash to publish them."""
-    await _require_org_site(site_id, current_user, db)
-    return await get_draft_status(db, site_id)
-
-
-@router.post("/sites/{site_id}/publish", response_model=RevisionSummary)
-async def publish_config(
-    site_id: uuid.UUID,
-    body: PublishRequest,
-    current_user: CurrentUser = Depends(require_role("owner", "admin")),
-    db: AsyncSession = Depends(get_db),
-) -> SiteConfigRevision:
-    """Publish the site's draft as a new live revision. Requires admin role."""
-    await _require_org_site(site_id, current_user, db)
-    try:
-        return await publish_draft(
-            db,
-            site_id,
-            expected_content_hash=body.expected_content_hash,
-            published_by=current_user.id,
-            note=body.note,
-            requires_reconsent=body.ask_visitors_again,
-        )
-    except SiteNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found") from exc
-    except DraftOutOfDateError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The draft has changed since you reviewed it. Review the changes again.",
-        ) from exc
-    except NothingToPublishError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="There are no unpublished changes",
-        ) from exc
-
-
-async def _require_org_site(
-    site_id: uuid.UUID, current_user: CurrentUser, db: AsyncSession
-) -> None:
-    site_id_in_org = (
-        await db.execute(
-            select(Site.id).where(
-                Site.id == site_id,
-                Site.organisation_id == current_user.organisation_id,
-                Site.is_active.is_(True),
-                Site.deleted_at.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
-    if site_id_in_org is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
