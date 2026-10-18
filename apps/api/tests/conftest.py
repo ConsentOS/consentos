@@ -302,3 +302,16 @@ async def create_test_site(
     )
     assert resp.status_code == 201, f"Failed to create test site: {resp.text}"
     return resp.json()["id"]
+
+
+async def publish_site(client: AsyncClient, headers: dict, site_id: str) -> dict:
+    """Publish a site's current draft via the API and return the revision."""
+    draft = await client.get(f"/api/v1/config/sites/{site_id}/draft", headers=headers)
+    assert draft.status_code == 200, draft.text
+    resp = await client.post(
+        f"/api/v1/config/sites/{site_id}/publish",
+        headers=headers,
+        json={"expected_content_hash": draft.json()["content_hash"]},
+    )
+    assert resp.status_code == 200, f"Failed to publish test site: {resp.text}"
+    return resp.json()

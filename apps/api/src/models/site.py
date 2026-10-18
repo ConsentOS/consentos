@@ -31,6 +31,18 @@ class Site(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
         nullable=True,
         index=True,
     )
+    # The revision the banner serves. ``None`` until the site's first
+    # publish, when the banner falls back to its built-in defaults.
+    live_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "site_config_revisions.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_sites_live_revision_id",
+        ),
+        nullable=True,
+    )
 
     # Relationships
     organisation: Mapped["Organisation"] = relationship(back_populates="sites")  # noqa: F821

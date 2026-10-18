@@ -53,6 +53,19 @@ function RecordDetail({ record }: { record: ConsentRecord }) {
             <span className="font-medium text-text-secondary">Rejected</span>
             <p className="mt-0.5">{record.categories_rejected?.join(', ') || '—'}</p>
           </div>
+          <div>
+            <span className="font-medium text-text-secondary">Configuration</span>
+            <p className="mt-0.5">
+              {record.config_revision_number !== null
+                ? `v${record.config_revision_number}`
+                : 'Not recorded'}
+            </p>
+            {record.consent_version && (
+              <p className="mt-0.5 break-all font-mono text-[11px] text-text-secondary">
+                Consent version {record.consent_version}
+              </p>
+            )}
+          </div>
           {record.country_code && (
             <div>
               <span className="font-medium text-text-secondary">Location</span>

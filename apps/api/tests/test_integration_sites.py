@@ -2,7 +2,7 @@
 
 import uuid
 
-from tests.conftest import requires_db
+from tests.conftest import publish_site, requires_db
 
 
 @requires_db
@@ -312,6 +312,7 @@ class TestPublicCookies:
             headers=auth_headers,
         )
 
+        await publish_site(db_client, auth_headers, site_id)
         resp = await db_client.get(f"/api/v1/config/sites/{site_id}/cookies")
         assert resp.status_code == 200
         body = resp.json()
@@ -335,6 +336,7 @@ class TestPublicCookies:
             headers=auth_headers,
         )
 
+        await publish_site(db_client, auth_headers, site_id)
         resp = await db_client.get(f"/api/v1/config/sites/{site_id}/cookies")
         assert resp.status_code == 200
         body = resp.json()

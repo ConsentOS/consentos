@@ -46,6 +46,11 @@ async def update_org_config(
 ) -> OrgConfig:
     """Create or update the organisation's global configuration defaults.
 
+    Changes the draft of every site that inherits these defaults. Visitors
+    see the change once those sites are published: ``GET
+    /config/affected-sites`` lists them and ``POST /config/bulk-publish``
+    publishes them together.
+
     Only non-None fields will override system defaults when resolving site config.
     """
     result = await db.execute(

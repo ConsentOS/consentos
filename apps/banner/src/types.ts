@@ -59,6 +59,17 @@ export interface SiteConfig {
   consent_expiry_days: number;
   /** Consent group ID for cross-domain sync (null if not in a group). */
   consent_group_id: string | null;
+  /**
+   * The published revision this config came from, recorded with each
+   * consent so proof of consent shows exactly what the visitor saw.
+   * Absent from the built-in defaults.
+   */
+  revision_id?: string | null;
+  /**
+   * Set when this is an unpublished draft shown through a preview link.
+   * Nothing is stored or recorded as consent while previewing.
+   */
+  preview?: boolean;
   /** Initiator map: root script URL → category for root-level blocking. */
   initiator_map: InitiatorMapping[] | null;
   /**

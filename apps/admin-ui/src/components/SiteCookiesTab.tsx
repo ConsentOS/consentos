@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { getCookieSummary, listCategories, listCookies, updateCookie } from '../api/cookies';
+import { apiErrorMessage } from '../api/revisions';
 import type { Cookie, CookieCategory } from '../types/api';
 import { Badge } from './ui/badge';
 import { EmptyState } from './ui/empty-state';
@@ -10,6 +12,20 @@ import { Select } from './ui/select';
 
 interface Props {
   siteId: string;
+}
+
+type SaveResult = { ok: true } | { ok: false; message: string };
+
+function SaveNote({ result }: { result: SaveResult }) {
+  return result.ok ? (
+    <p role="status" className="mt-1 text-xs text-status-success-fg">
+      Saved. Publish to apply.
+    </p>
+  ) : (
+    <p role="status" className="mt-1 text-xs text-status-error-fg">
+      {result.message}
+    </p>
+  );
 }
 
 export default function SiteCookiesTab({ siteId }: Props) {
@@ -30,12 +46,23 @@ export default function SiteCookiesTab({ siteId }: Props) {
     queryFn: () => getCookieSummary(siteId),
   });
 
+  // The outcome of the last change to each cookie, shown on its row.
+  const [saveResults, setSaveResults] = useState<Record<string, SaveResult>>({});
+
   const updateMutation = useMutation({
     mutationFn: ({ cookieId, body }: { cookieId: string; body: Partial<Cookie> }) =>
       updateCookie(siteId, cookieId, body),
-    onSuccess: () => {
+    onSuccess: (_data, { cookieId }) => {
+      setSaveResults((results) => ({ ...results, [cookieId]: { ok: true } }));
       queryClient.invalidateQueries({ queryKey: ['cookies', siteId] });
       queryClient.invalidateQueries({ queryKey: ['cookies', siteId, 'summary'] });
+      queryClient.invalidateQueries({ queryKey: ['sites', siteId, 'draft'] });
+    },
+    onError: (error, { cookieId }) => {
+      setSaveResults((results) => ({
+        ...results,
+        [cookieId]: { ok: false, message: apiErrorMessage(error, 'Not saved. Try again.') },
+      }));
     },
   });
 
@@ -136,6 +163,7 @@ export default function SiteCookiesTab({ siteId }: Props) {
                         </button>
                       )}
                     </div>
+                    {saveResults[cookie.id] && <SaveNote result={saveResults[cookie.id]} />}
                   </td>
                 </tr>
               ))}

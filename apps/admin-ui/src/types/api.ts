@@ -27,6 +27,8 @@ export interface Site {
   display_name: string;
   is_active: boolean;
   site_group_id: string | null;
+  /** ``null`` until the site's first publish. */
+  live_revision_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -393,6 +395,10 @@ export interface ConsentRecord {
   page_url: string | null;
   country_code: string | null;
   region_code: string | null;
+  /** The published revision the visitor consented against, if recorded. */
+  config_revision_id: string | null;
+  consent_version: string | null;
+  config_revision_number: number | null;
   consented_at: string;
 }
 
@@ -407,4 +413,106 @@ export interface VersionInfo {
   current: string;
   latest: string | null;
   update_available: boolean;
+}
+
+// ── Config revisions ─────────────────────────────────────────────────
+
+export interface RevisionSummary {
+  id: string;
+  number: number;
+  content_hash: string;
+  consent_version: string;
+  requires_reconsent: boolean;
+  note: string | null;
+  published_by: string | null;
+  published_at: string;
+}
+
+export interface RevisionListItem extends RevisionSummary {
+  is_live: boolean;
+  published_by_name: string | null;
+  rolled_back_from_id: string | null;
+  rolled_back_from_number: number | null;
+}
+
+export interface RevisionList {
+  items: RevisionListItem[];
+  total: number;
+}
+
+export type ReconsentReason = 'categories' | 'purposes' | 'vendors';
+
+export interface PublishAttempt {
+  action: 'publish' | 'rollback' | 'bulk_publish';
+  status: 'succeeded' | 'failed';
+  error_code: string | null;
+  error_message: string | null;
+  attempted_at: string;
+  attempted_by_name: string | null;
+  revision_number: number | null;
+}
+
+export interface DraftStatus {
+  live_revision: RevisionSummary | null;
+  content_hash: string;
+  has_unpublished_changes: boolean;
+  changed_sources: { kind: string; id: string }[];
+  reconsent_reasons: ReconsentReason[];
+  last_attempt: PublishAttempt | null;
+}
+
+export interface RevisionDetail extends RevisionListItem {
+  snapshot: Record<string, unknown>;
+  sources: { kind: string; id: string; content_hash: string }[];
+  rollback_reconsent_reasons: ReconsentReason[];
+}
+
+export type ChangeSource = 'site' | 'site_group' | 'organisation' | 'system';
+
+export interface DiffChange {
+  area: 'settings' | 'banner' | 'translations' | 'categories' | 'cookies' | 'other';
+  key: string;
+  before: unknown;
+  after: unknown;
+  source: ChangeSource;
+}
+
+export interface DiffSide {
+  revision_id: string | null;
+  number: number | null;
+  content_hash: string | null;
+}
+
+export interface ConfigDiff {
+  from: DiffSide | null;
+  to: DiffSide;
+  changes: DiffChange[];
+  reconsent_reasons: ReconsentReason[];
+}
+
+export interface AffectedSite {
+  site_id: string;
+  name: string;
+  domain: string;
+  live_number: number;
+  content_hash: string;
+  changed_sources: { kind: string; id: string }[];
+}
+
+export interface BulkPublishResult {
+  site_id: string;
+  status: 'succeeded' | 'failed';
+  revision_number: number | null;
+  error_message: string | null;
+}
+
+export interface BulkPublishResponse {
+  batch_id: string;
+  results: BulkPublishResult[];
+}
+
+export interface PreviewLink {
+  token: string;
+  expires_at: string;
+  url: string;
 }

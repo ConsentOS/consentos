@@ -193,6 +193,27 @@ describe('reconsent', () => {
       expect(result.reasons).toHaveLength(2);
     });
 
+    it('should not prompt again when only other settings changed', () => {
+      // A publish that keeps the consent version, e.g. a wording or
+      // colour change, leaves config.id alone.
+      const consent = makeConsent({ configVersion: 'consent-v1' });
+      const config = makeConfig({
+        id: 'consent-v1',
+        blocking_mode: 'opt_out',
+        privacy_policy_url: 'https://example.com/new-policy',
+        banner_config: { primaryColour: '#ff0000' } as SiteConfig['banner_config'],
+      });
+
+      expect(needsReconsent(consent, config).required).toBe(false);
+    });
+
+    it('should prompt again when only the consent version changed', () => {
+      const consent = makeConsent({ configVersion: 'consent-v1' });
+      const config = makeConfig({ id: 'consent-v2' });
+
+      expect(needsReconsent(consent, config).reasons).toEqual(['config_changed']);
+    });
+
     it('should not require re-consent for fresh consent with matching config', () => {
       const consent = makeConsent({
         consentedAt: new Date().toISOString(), // just now

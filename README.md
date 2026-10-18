@@ -107,6 +107,8 @@ The admin UI also serves the banner scripts (`consent-loader.js` and `consent-bu
 
 To hold back your own third-party scripts until the visitor consents, tag them with `type="text/plain" data-category="..."`. See [docs/script-blocking.md](docs/script-blocking.md).
 
+Configuration changes go live when you publish them, and each publish is kept so you can roll back. See [docs/publishing.md](docs/publishing.md).
+
 ### Upgrading from PostgreSQL 16
 
 The dev compose ships `postgres:17-alpine`. If your `consentos_pgdata` volume was initialised on an earlier major (e.g. `postgres:16-alpine`), the postgres container fails to start with:

@@ -306,9 +306,7 @@ function SiteTable({
                   {site.display_name ?? site.name ?? '-'}
                 </td>
                 <td className="px-4 py-3 lg:px-6">
-                  <Badge variant={site.is_active ? 'success' : 'neutral'}>
-                    {site.is_active ? 'Active' : 'Inactive'}
-                  </Badge>
+                  <SiteStatus site={site} />
                 </td>
                 <td className="hidden px-4 py-3 text-sm text-text-secondary md:table-cell lg:px-6">
                   {new Date(site.created_at).toLocaleDateString()}
@@ -347,9 +345,9 @@ function SiteTable({
                   {site.display_name ?? site.name ?? '-'}
                 </p>
               </div>
-              <Badge variant={site.is_active ? 'success' : 'neutral'} className="ml-2 shrink-0">
-                {site.is_active ? 'Active' : 'Inactive'}
-              </Badge>
+              <div className="ml-2 shrink-0">
+                <SiteStatus site={site} />
+              </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
               <GroupAssigner
@@ -444,4 +442,20 @@ function GroupAssigner({
   }
 
   return <span className="text-xs text-text-tertiary">&mdash;</span>;
+}
+
+/** Active or inactive, and whether visitors are seeing a published config yet. */
+function SiteStatus({ site }: { site: Site }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <Badge variant={site.is_active ? 'success' : 'neutral'}>
+        {site.is_active ? 'Active' : 'Inactive'}
+      </Badge>
+      {!site.live_revision_id && (
+        <Link to={`/sites/${site.id}`} title="Visitors see the built-in defaults until you publish">
+          <Badge variant="warning">Not yet published</Badge>
+        </Link>
+      )}
+    </div>
+  );
 }

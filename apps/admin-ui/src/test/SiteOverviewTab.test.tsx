@@ -13,6 +13,18 @@ vi.mock('../api/sites', () => ({
   deleteSite: (id: string) => mockDeleteSite(id),
 }));
 
+vi.mock('../api/revisions', () => ({
+  getDraftStatus: () =>
+    Promise.resolve({
+      live_revision: null,
+      content_hash: '0'.repeat(64),
+      has_unpublished_changes: true,
+      changed_sources: [],
+      reconsent_reasons: [],
+      last_attempt: null,
+    }),
+}));
+
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>(
     'react-router-dom',
@@ -28,6 +40,7 @@ const TEST_SITE: Site = {
   display_name: 'Example',
   is_active: true,
   site_group_id: null,
+  live_revision_id: 'rev-1',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 };

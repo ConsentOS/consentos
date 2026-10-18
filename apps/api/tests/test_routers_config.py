@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from src.main import create_app
 from src.services.auth import create_access_token
+from src.services.config_resolver import resolve_config
 
 ORG_ID = uuid.uuid4()
 USER_ID = uuid.uuid4()
@@ -107,30 +108,50 @@ class TestPublicSiteConfig:
         assert resp.status_code == 404
 
 
+def _live_revision(translations=None, **config):
+    """A live revision whose snapshot resolves ``config`` over the defaults."""
+    resolved = resolve_config(config)
+    resolved.pop("scan_max_pages")
+    revision = MagicMock(spec=[])
+    revision.id = uuid.uuid4()
+    revision.consent_version = uuid.uuid4()
+    revision.snapshot = {
+        "format": 1,
+        "config": resolved,
+        "extensions": {},
+        "gvl_version": None,
+        "category_tcf_purposes": {},
+        "cookie_count": 0,
+        "translations": translations or {},
+        "cookies": [],
+    }
+    return revision
+
+
 class TestResolvedConfig:
     @pytest.mark.asyncio
-    async def test_get_resolved_config(self, mock_app):
-        config = _mock_config()
-        # Resolved endpoint queries: config, site org_id, org_config,
-        # site group_id, gvl meta, category-purpose mapping.
-        db = _mock_db_sequence(config, ORG_ID, None, None, None, [], 0)
+    async def test_serves_the_live_revision(self, mock_app):
+        revision = _live_revision()
+        db = _mock_db_sequence(revision)
+        site_id = uuid.uuid4()
         async with await _client(mock_app, db) as client:
-            resp = await client.get(f"/api/v1/config/sites/{config.site_id}/resolved")
+            resp = await client.get(f"/api/v1/config/sites/{site_id}/resolved")
         assert resp.status_code == 200
         data = resp.json()
-        assert "site_id" in data
-        assert "blocking_mode" in data
+        assert data["site_id"] == str(site_id)
+        assert data["id"] == str(revision.consent_version)
 
     @pytest.mark.asyncio
-    async def test_get_resolved_config_with_region(self, mock_app):
-        config = _mock_config(regional_modes={"EU": "opt_in", "US": "opt_out"})
-        db = _mock_db_sequence(config, ORG_ID, None, None, None, [], 0)
+    async def test_applies_the_requested_region(self, mock_app):
+        revision = _live_revision(regional_modes={"EU": "opt_in", "US": "opt_out"})
+        db = _mock_db_sequence(revision)
         async with await _client(mock_app, db) as client:
-            resp = await client.get(f"/api/v1/config/sites/{config.site_id}/resolved?region=EU")
+            resp = await client.get(f"/api/v1/config/sites/{uuid.uuid4()}/resolved?region=US")
         assert resp.status_code == 200
+        assert resp.json()["blocking_mode"] == "opt_out"
 
     @pytest.mark.asyncio
-    async def test_get_resolved_config_not_found(self, mock_app):
+    async def test_unpublished_site_is_not_found(self, mock_app):
         db = _mock_db_sequence(None)
         async with await _client(mock_app, db) as client:
             resp = await client.get(f"/api/v1/config/sites/{uuid.uuid4()}/resolved")
@@ -139,92 +160,45 @@ class TestResolvedConfig:
 
 class TestPublishConfig:
     @pytest.mark.asyncio
-    async def test_publish_config_success(self, mock_app):
-        config = _mock_config()
-        # Publish does: config query, org_config query, group_id, extension query
-        db = _mock_db_sequence(config, None, None, None)
-
-        mock_result = MagicMock()
-        mock_result.success = True
-        mock_result.path = "/cdn/site-config.json"
-        mock_result.published_at = datetime.now(UTC).isoformat()
-
-        with patch(
-            "src.routers.config.publish_site_config",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
-            async with await _client(mock_app, db) as client:
-                resp = await client.post(
-                    f"/api/v1/config/sites/{config.site_id}/publish",
-                    headers=_auth_headers(),
-                )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["published"] is True
-
-    @pytest.mark.asyncio
-    async def test_publish_config_failure(self, mock_app):
-        config = _mock_config()
-        db = _mock_db_sequence(config, None, None, None)
-
-        mock_result = MagicMock()
-        mock_result.success = False
-        mock_result.error = "Disk full"
-
-        with patch(
-            "src.routers.config.publish_site_config",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
-            async with await _client(mock_app, db) as client:
-                resp = await client.post(
-                    f"/api/v1/config/sites/{config.site_id}/publish",
-                    headers=_auth_headers(),
-                )
-        assert resp.status_code == 500
-
-    @pytest.mark.asyncio
-    async def test_publish_config_not_found(self, mock_app):
+    async def test_site_outside_org_is_not_found(self, mock_app):
         db = _mock_db_sequence(None)
         async with await _client(mock_app, db) as client:
             resp = await client.post(
                 f"/api/v1/config/sites/{uuid.uuid4()}/publish",
                 headers=_auth_headers(),
+                json={"expected_content_hash": "0" * 64},
             )
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_publish_requires_admin(self, mock_app):
+    async def test_requires_the_reviewed_hash(self, mock_app):
         db = _mock_db_sequence()
         async with await _client(mock_app, db) as client:
             resp = await client.post(
                 f"/api/v1/config/sites/{uuid.uuid4()}/publish",
-                headers=_auth_headers(role="viewer"),
+                headers=_auth_headers(),
+                json={"expected_content_hash": "not-a-hash"},
             )
-        assert resp.status_code == 403
+        assert resp.status_code == 422
 
 
 class TestGeoResolvedConfig:
     @pytest.mark.asyncio
     async def test_get_geo_resolved_config_with_header(self, mock_app):
-        config = _mock_config(
+        revision = _live_revision(
             regional_modes={"EU": "opt_in", "US": "opt_out", "DEFAULT": "informational"},
+            translations={"de": {"title": "Wir verwenden Cookies"}},
         )
-        # Geo-resolved queries: config, site org_id, org_config,
-        # site group_id, gvl meta, category-purpose mapping, cookie count,
-        # the requested locale's translation.
-        db = _mock_db_sequence(
-            config, ORG_ID, None, None, None, [], 0, [("de", {"title": "Wir verwenden Cookies"})]
-        )
+        db = _mock_db_sequence(revision)
         async with await _client(mock_app, db) as client:
             resp = await client.get(
-                f"/api/v1/config/sites/{config.site_id}/geo-resolved",
+                f"/api/v1/config/sites/{uuid.uuid4()}/geo-resolved",
                 params={"locale": "de"},
                 headers={"cf-ipcountry": "DE"},
             )
         assert resp.status_code == 200
         data = resp.json()
+        assert data["id"] == str(revision.consent_version)
         assert data["blocking_mode"] == "opt_in"
         assert data["detected_country"] == "DE"
         assert data["detected_region"] == "EU"
@@ -234,15 +208,11 @@ class TestGeoResolvedConfig:
 
     @pytest.mark.asyncio
     async def test_get_geo_resolved_config_locale_base_language_fallback(self, mock_app):
-        config = _mock_config(regional_modes={"DEFAULT": "opt_in"})
-        # Stored locale is ``de``; the visitor asks for ``de-de`` and the
-        # base language matches. Result is keyed by the requested locale.
-        db = _mock_db_sequence(
-            config, ORG_ID, None, None, None, [], 0, [("de", {"title": "Wir verwenden Cookies"})]
-        )
+        revision = _live_revision(translations={"de": {"title": "Wir verwenden Cookies"}})
+        db = _mock_db_sequence(revision)
         async with await _client(mock_app, db) as client:
             resp = await client.get(
-                f"/api/v1/config/sites/{config.site_id}/geo-resolved",
+                f"/api/v1/config/sites/{uuid.uuid4()}/geo-resolved",
                 params={"locale": "de-DE"},
             )
         assert resp.status_code == 200
@@ -250,13 +220,10 @@ class TestGeoResolvedConfig:
 
     @pytest.mark.asyncio
     async def test_get_geo_resolved_config_locale_no_match(self, mock_app):
-        config = _mock_config(regional_modes={"DEFAULT": "opt_in"})
-        # Requested locale has no stored translation — banner falls back
-        # to its built-in English defaults.
-        db = _mock_db_sequence(config, ORG_ID, None, None, None, [], 0, [])
+        db = _mock_db_sequence(_live_revision(translations={"de": {"title": "Hallo"}}))
         async with await _client(mock_app, db) as client:
             resp = await client.get(
-                f"/api/v1/config/sites/{config.site_id}/geo-resolved",
+                f"/api/v1/config/sites/{uuid.uuid4()}/geo-resolved",
                 params={"locale": "fr"},
             )
         assert resp.status_code == 200
@@ -264,11 +231,10 @@ class TestGeoResolvedConfig:
 
     @pytest.mark.asyncio
     async def test_get_geo_resolved_config_us(self, mock_app):
-        config = _mock_config(
+        revision = _live_revision(
             regional_modes={"EU": "opt_in", "US-CA": "opt_out", "DEFAULT": "informational"},
         )
-        # No locale requested, so the translations query is skipped.
-        db = _mock_db_sequence(config, ORG_ID, None, None, None, [], 0)
+        db = _mock_db_sequence(revision)
 
         with patch(
             "src.routers.config.detect_region",
@@ -279,7 +245,7 @@ class TestGeoResolvedConfig:
             mock_detect.return_value = GeoResult(country_code="US", region="US-CA")
             async with await _client(mock_app, db) as client:
                 resp = await client.get(
-                    f"/api/v1/config/sites/{config.site_id}/geo-resolved",
+                    f"/api/v1/config/sites/{uuid.uuid4()}/geo-resolved",
                 )
         assert resp.status_code == 200
         data = resp.json()
@@ -288,7 +254,7 @@ class TestGeoResolvedConfig:
         assert data["translations"] == {}
 
     @pytest.mark.asyncio
-    async def test_get_geo_resolved_config_not_found(self, mock_app):
+    async def test_get_geo_resolved_config_not_published(self, mock_app):
         db = _mock_db_sequence(None)
         async with await _client(mock_app, db) as client:
             resp = await client.get(
@@ -298,11 +264,10 @@ class TestGeoResolvedConfig:
 
     @pytest.mark.asyncio
     async def test_get_geo_resolved_config_no_region_detected(self, mock_app):
-        config = _mock_config(
+        revision = _live_revision(
             regional_modes={"EU": "opt_in", "DEFAULT": "informational"},
         )
-        # No locale requested, so the translations query is skipped.
-        db = _mock_db_sequence(config, ORG_ID, None, None, None, [], 0)
+        db = _mock_db_sequence(revision)
 
         with patch(
             "src.routers.config.detect_region",
@@ -313,7 +278,7 @@ class TestGeoResolvedConfig:
             mock_detect.return_value = GeoResult(country_code=None, region=None)
             async with await _client(mock_app, db) as client:
                 resp = await client.get(
-                    f"/api/v1/config/sites/{config.site_id}/geo-resolved",
+                    f"/api/v1/config/sites/{uuid.uuid4()}/geo-resolved",
                 )
         assert resp.status_code == 200
         data = resp.json()
@@ -352,75 +317,3 @@ class TestVisitorGeo:
         data = resp.json()
         assert data["country_code"] is None
         assert data["region"] is None
-
-
-def _mock_cookie(name, review_status, category_id=None):
-    cookie = MagicMock()
-    cookie.name = name
-    cookie.domain = ".example.com"
-    cookie.storage_type = "cookie"
-    cookie.description = None
-    cookie.vendor = None
-    cookie.category_id = category_id
-    cookie.review_status = review_status
-    return cookie
-
-
-def _scalars_result(items):
-    result = MagicMock()
-    result.scalars.return_value.all.return_value = items
-    return result
-
-
-class TestPublicCookies:
-    @pytest.mark.asyncio
-    async def test_rejected_cookies_hidden_and_pending_shown(self, mock_app):
-        site = MagicMock()
-        site.display_name = "Example"
-        site.domain = "example.com"
-        category = MagicMock()
-        category.id = uuid.uuid4()
-        category.slug = "necessary"
-        category.name = "Necessary"
-        category.description = ""
-        category.is_essential = True
-        cookies = [
-            _mock_cookie("pending_uncategorised", "pending"),
-            _mock_cookie("approved_uncategorised", "approved"),
-            _mock_cookie("rejected_uncategorised", "rejected"),
-            _mock_cookie("pending_categorised", "pending", category_id=category.id),
-            _mock_cookie("rejected_categorised", "rejected", category_id=category.id),
-        ]
-        site_result = MagicMock()
-        site_result.scalar_one_or_none.return_value = site
-        config_result = MagicMock()
-        config_result.scalar_one_or_none.return_value = None
-        db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[
-                site_result,
-                config_result,
-                _scalars_result([category]),
-                _scalars_result(cookies),
-            ]
-        )
-
-        with (
-            patch("src.routers.config._get_site_org_id", AsyncMock(return_value=None)),
-            patch("src.routers.config._get_site_group_id", AsyncMock(return_value=None)),
-            patch(
-                "src.routers.config.resolve_config",
-                return_value={"enabled_categories": ["necessary"]},
-            ),
-        ):
-            async with await _client(mock_app, db) as client:
-                resp = await client.get(f"/api/v1/config/sites/{uuid.uuid4()}/cookies")
-
-        assert resp.status_code == 200
-        names = {
-            cat["slug"]: [c["name"] for c in cat["cookies"]] for cat in resp.json()["categories"]
-        }
-        assert names == {
-            "necessary": ["pending_categorised"],
-            "uncategorised": ["pending_uncategorised", "approved_uncategorised"],
-        }

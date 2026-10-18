@@ -53,6 +53,11 @@ async def update_site_group_config(
 ) -> SiteGroupConfig:
     """Create or update configuration defaults for a site group.
 
+    Changes the draft of every site that inherits these defaults. Visitors
+    see the change once those sites are published: ``GET
+    /config/affected-sites`` lists them and ``POST /config/bulk-publish``
+    publishes them together.
+
     Only non-None fields will override org/system defaults when resolving site config.
     """
     await _verify_group_ownership(group_id, current_user.organisation_id, db)
