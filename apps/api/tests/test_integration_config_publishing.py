@@ -60,6 +60,16 @@ class TestNotYetPublished:
         site_id = await create_test_site(db_client, auth_headers)
         assert (await _banner(db_client, site_id)).status_code == 404
 
+    async def test_site_shows_whether_it_is_published(self, db_client, auth_headers):
+        site_id = await create_test_site(db_client, auth_headers)
+        site = (await db_client.get(f"/api/v1/sites/{site_id}", headers=auth_headers)).json()
+        assert site["live_revision_id"] is None
+
+        published = await _publish_draft(db_client, auth_headers, site_id)
+
+        site = (await db_client.get(f"/api/v1/sites/{site_id}", headers=auth_headers)).json()
+        assert site["live_revision_id"] == published["id"]
+
     async def test_draft_reports_unpublished_changes(self, db_client, auth_headers):
         site_id = await create_test_site(db_client, auth_headers)
         draft = await _draft(db_client, auth_headers, site_id)

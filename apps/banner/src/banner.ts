@@ -32,6 +32,7 @@ import {
 } from './tcf';
 import { needsReconsent } from './reconsent';
 import { updateShopifyConsent } from './shopify';
+import { fetchSiteConfig } from './site-config';
 import type { TCModel } from './tcf';
 import type { BannerConfig, ButtonConfig, CategorySlug, ConsentState, SiteConfig } from './types';
 
@@ -165,18 +166,9 @@ async function init(): Promise<void> {
   // visitor's translation rather than every locale the site has.
   const locale = detectLocale();
 
-  // Fetch site config
-  let config: SiteConfig;
-  try {
-    const resp = await fetch(
-      `${apiBase}/api/v1/config/sites/${siteId}/geo-resolved?locale=${encodeURIComponent(locale)}`,
-    );
-    if (!resp.ok) throw new Error(`Config fetch failed: ${resp.status}`);
-    config = await resp.json();
-  } catch (err) {
-    console.error('[ConsentOS] Failed to load site config:', err);
-    config = buildDefaultConfig(siteId);
-  }
+  const config = await fetchSiteConfig(apiBase, siteId, locale, () =>
+    buildDefaultConfig(siteId),
+  );
 
   const existingConsent = readConsent();
 
