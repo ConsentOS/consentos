@@ -216,7 +216,11 @@ async def create_allow_list_entry(
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
 ) -> CookieAllowListEntry:
-    """Add a cookie pattern to the allow-list for a site."""
+    """Add a cookie pattern to the allow-list for a site.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user, db)
 
     # Validate category
@@ -248,7 +252,11 @@ async def update_allow_list_entry(
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
 ) -> CookieAllowListEntry:
-    """Update an allow-list entry."""
+    """Update an allow-list entry.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user, db)
 
     result = await db.execute(
@@ -295,7 +303,11 @@ async def delete_allow_list_entry(
     current_user: CurrentUser = Depends(require_role("owner", "admin")),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Remove an entry from the allow-list."""
+    """Remove an entry from the allow-list.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user, db)
 
     result = await db.execute(
@@ -344,7 +356,11 @@ async def update_cookie(
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
 ) -> Cookie:
-    """Update a cookie record (e.g. assign category, change review status)."""
+    """Update a cookie record (e.g. assign category, change review status).
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user, db)
 
     result = await db.execute(
@@ -386,7 +402,11 @@ async def delete_cookie(
     current_user: CurrentUser = Depends(require_role("owner", "admin")),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete a cookie record."""
+    """Delete a cookie record.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user, db)
 
     result = await db.execute(
@@ -540,7 +560,11 @@ async def classify_cookies(
     current_user: CurrentUser = Depends(require_role("owner", "admin", "editor")),
     db: AsyncSession = Depends(get_db),
 ) -> ClassifySiteResponse:
-    """Auto-classify pending cookies for a site against known patterns."""
+    """Auto-classify pending cookies for a site against known patterns.
+
+    Changes the draft only. Visitors see it once the site is published
+    with ``POST /config/sites/{site_id}/publish``.
+    """
     await _get_org_site(site_id, current_user, db)
 
     results = await classify_site_cookies(db, site_id, only_pending=True)

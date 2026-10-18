@@ -693,6 +693,16 @@ Serverless platforms don't have a persistent filesystem for MaxMind databases. Y
 
 ## Upgrade Notes
 
+### Configuration changes are published
+
+Saving configuration no longer changes what visitors see. Edits build up in a draft and go live when an owner or admin publishes them, and every publish is kept as a revision that can be rolled back to. See [Publishing configuration](publishing.md).
+
+**What the upgrade does.** Migration `0013` adds the revision tables and publishes v1 for every existing site that has a configuration, built from what it serves today. Each v1 keeps the site's existing configuration ID as its consent version, which is what the banner already compares against, so after the upgrade every site serves the same configuration and no visitor is asked to consent again. Deleted sites are skipped. The migration needs no manual steps and runs with the others on startup. Downgrading removes the new tables and columns and leaves existing data as it was.
+
+**New sites.** A site created after the upgrade has nothing live until its first publish, and `GET /config/sites/{id}/geo-resolved` returns `404` for it. The banner then uses its built-in defaults. Publish new sites before adding the banner to them.
+
+**Caching.** `GET /config/sites/{id}/geo-resolved` now only changes when someone publishes. Responses for a draft preview link are sent with `Cache-Control: no-store`.
+
 ### Consent and cookie reports are checked against the site's domains
 
 Consent records and cookie reports are only accepted from the site's domain and its additional domains, including their subdomains. The API checks the request's `Origin` header (or `Referer` when `Origin` is absent or `null`) and, for cookie reports, the reported page URL. Requests from any other domain are rejected with `403`, and each rejection is logged at warning level with the site ID and the rejected host. Consent and cookie reports for inactive sites are rejected with `404`.
