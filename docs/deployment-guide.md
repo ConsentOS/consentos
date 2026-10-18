@@ -703,6 +703,16 @@ Saving configuration no longer changes what visitors see. Edits build up in a dr
 
 **Caching.** `GET /config/sites/{id}/geo-resolved` now only changes when someone publishes. Responses for a draft preview link are sent with `Cache-Control: no-store`.
 
+### Scans report their progress
+
+The API now runs scans through the scanner's `POST /scan/stream` endpoint, which reports progress after each page, instead of `POST /scan`. **Upgrade the scanner and the API together**: an API on this version can't run scans against an older scanner. `POST /scan` is unchanged for anything else that calls it.
+
+New sites are scanned as soon as they are created. To create a site through the API without scanning it, send `"start_scan": false` in the `POST /sites/` body.
+
+Scheduled scans now use the site's page limit and are skipped while a scan is already running for the site.
+
+A running scan is now only treated as lost when it has recorded no progress for 10 minutes, rather than 10 minutes after it started, and `SCANNER_TIMEOUT_SECONDS` now limits the wait for each page rather than the whole scan. Large sites that used to fail partway through now finish.
+
 ### Consent and cookie reports are checked against the site's domains
 
 Consent records and cookie reports are only accepted from the site's domain and its additional domains, including their subdomains. The API checks the request's `Origin` header (or `Referer` when `Origin` is absent or `null`) and, for cookie reports, the reported page URL. Requests from any other domain are rejected with `403`, and each rejection is logged at warning level with the site ID and the rejected host. Consent and cookie reports for inactive sites are rejected with `404`.

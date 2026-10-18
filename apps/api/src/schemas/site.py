@@ -22,6 +22,10 @@ class SiteCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=255)
     additional_domains: list[str] | None = None
     site_group_id: uuid.UUID | None = None
+    start_scan: bool = Field(
+        default=True,
+        description="Start the site's first cookie scan as soon as it is created.",
+    )
 
 
 class SiteUpdate(BaseModel):

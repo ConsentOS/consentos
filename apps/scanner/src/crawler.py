@@ -20,6 +20,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import quote, urlparse
@@ -169,8 +170,13 @@ class CookieCrawler:
         urls: list[str],
         *,
         max_pages: int = 50,
+        on_page: Callable[[SiteCrawlResult, int], Awaitable[None]] | None = None,
     ) -> SiteCrawlResult:
-        """Crawl multiple URLs and aggregate cookie discoveries."""
+        """Crawl multiple URLs and aggregate cookie discoveries.
+
+        ``on_page`` is awaited after each page with the result so far and
+        the number of pages that will be crawled in total.
+        """
         if not urls:
             return SiteCrawlResult(domain="")
 
@@ -188,10 +194,13 @@ class CookieCrawler:
                 launch_kwargs["proxy"] = proxy_opts
             browser = await pw.chromium.launch(**launch_kwargs)
             try:
-                for url in urls[:max_pages]:
+                to_crawl = urls[:max_pages]
+                for url in to_crawl:
                     page_result = await self._crawl_page(browser, url)
                     result.pages.append(page_result)
                     result.total_cookies_found += len(page_result.cookies)
+                    if on_page is not None:
+                        await on_page(result, len(to_crawl))
             finally:
                 await browser.close()
 

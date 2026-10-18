@@ -310,32 +310,14 @@ class TestTriggerScan:
         mock_job.created_at = now
         mock_job.updated_at = now
 
-        # First call: site lookup. Second call: running scan count.
-        call_count = 0
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = site_mock
+        db.execute = AsyncMock(return_value=result)
 
-        async def mock_execute(stmt):
-            nonlocal call_count
-            call_count += 1
-            result = MagicMock()
-            if call_count == 1:
-                # Site lookup
-                result.scalar_one_or_none.return_value = site_mock
-            elif call_count == 2:
-                # Active scan jobs query — none running
-                result.scalars.return_value.all.return_value = []
-            return result
-
-        db.execute = mock_execute
-        db.add = MagicMock()
-        db.flush = AsyncMock()
-
-        with (
-            patch(
-                "src.routers.scanner.create_scan_job",
-                new=AsyncMock(return_value=mock_job),
-            ),
-            patch("src.tasks.scanner.run_scan", create=True),
-        ):
+        with patch(
+            "src.routers.scanner.start_scan",
+            new=AsyncMock(return_value=mock_job),
+        ) as start:
             async with await _authed_client(app, db, user) as client:
                 resp = await client.post(
                     "/api/v1/scanner/scans",
@@ -346,6 +328,8 @@ class TestTriggerScan:
                 )
 
         assert resp.status_code == 201
+        assert start.await_args.kwargs["trigger"] == "manual"
+        assert start.await_args.kwargs["max_pages"] == 25
 
     @pytest.mark.asyncio
     async def test_trigger_scan_site_not_found(self, app):
@@ -375,6 +359,7 @@ class TestTriggerScan:
         active_job.status = "running"
         active_job.created_at = datetime.now(UTC)
         active_job.started_at = datetime.now(UTC)
+        active_job.updated_at = datetime.now(UTC)
 
         call_count = 0
 
@@ -481,7 +466,9 @@ class TestScanIntegration:
     """Integration tests against a live database."""
 
     async def test_trigger_scan(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="scan-trigger")
+        site_id = await create_test_site(
+            db_client, auth_headers, domain_prefix="scan-trigger", start_scan=False
+        )
         resp = await db_client.post(
             "/api/v1/scanner/scans",
             json={"site_id": site_id, "max_pages": 10},
@@ -494,7 +481,9 @@ class TestScanIntegration:
         assert data["pages_total"] == 10
 
     async def test_trigger_scan_conflict(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="scan-conflict")
+        site_id = await create_test_site(
+            db_client, auth_headers, domain_prefix="scan-conflict", start_scan=False
+        )
         # First scan
         resp1 = await db_client.post(
             "/api/v1/scanner/scans",
@@ -512,7 +501,9 @@ class TestScanIntegration:
         assert resp2.status_code == 409
 
     async def test_list_scans(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="scan-list")
+        site_id = await create_test_site(
+            db_client, auth_headers, domain_prefix="scan-list", start_scan=False
+        )
         # Trigger a scan
         await db_client.post(
             "/api/v1/scanner/scans",
@@ -530,7 +521,9 @@ class TestScanIntegration:
         assert scans[0]["site_id"] == site_id
 
     async def test_get_scan_detail(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="scan-detail")
+        site_id = await create_test_site(
+            db_client, auth_headers, domain_prefix="scan-detail", start_scan=False
+        )
         create_resp = await db_client.post(
             "/api/v1/scanner/scans",
             json={"site_id": site_id},
@@ -548,7 +541,9 @@ class TestScanIntegration:
         assert "results" in data
 
     async def test_get_scan_diff(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="scan-diff")
+        site_id = await create_test_site(
+            db_client, auth_headers, domain_prefix="scan-diff", start_scan=False
+        )
         create_resp = await db_client.post(
             "/api/v1/scanner/scans",
             json={"site_id": site_id},
@@ -574,7 +569,9 @@ class TestScanIntegration:
         assert resp.status_code == 404
 
     async def test_list_scans_pagination(self, db_client, auth_headers):
-        site_id = await create_test_site(db_client, auth_headers, domain_prefix="scan-page")
+        site_id = await create_test_site(
+            db_client, auth_headers, domain_prefix="scan-page", start_scan=False
+        )
         resp = await db_client.get(
             f"/api/v1/scanner/scans/site/{site_id}?limit=5&offset=0",
             headers=auth_headers,

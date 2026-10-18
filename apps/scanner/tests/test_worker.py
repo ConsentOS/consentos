@@ -265,3 +265,65 @@ def test_validate_applies_navigation_policy(monkeypatch, opt_out):
     assert resp.json()["banner_found"] is True
     assert context.route.called is not opt_out
     assert browser.new_context.await_args.kwargs["service_workers"] == "block"
+
+
+# ── Streamed scan ────────────────────────────────────────────────────
+
+
+def _stream_events(resp) -> list[dict]:
+    import json
+
+    return [json.loads(line) for line in resp.text.splitlines() if line]
+
+
+@patch("src.crawler.CookieCrawler.crawl_site")
+def test_scan_stream_reports_progress_then_result(mock_crawl, client):
+    """POST /scan/stream emits one progress line per page, then the result."""
+    from src.crawler import CrawlResult, DiscoveredCookie, SiteCrawlResult
+
+    urls = ["https://example.com/", "https://example.com/about"]
+    ga = DiscoveredCookie(name="_ga", domain=".example.com", page_url=urls[0])
+
+    async def crawl(urls, *, max_pages, on_page):
+        result = SiteCrawlResult(domain="example.com")
+        for url in urls:
+            result.pages.append(CrawlResult(url=url, cookies=[ga]))
+            result.total_cookies_found += 1
+            await on_page(result, len(urls))
+        return result
+
+    mock_crawl.side_effect = crawl
+
+    resp = client.post("/scan/stream", json={"domain": "example.com", "urls": urls})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/x-ndjson")
+
+    events = _stream_events(resp)
+    assert events[:2] == [
+        {"type": "progress", "pages_crawled": 1, "pages_total": 2, "cookies_found": 1},
+        {"type": "progress", "pages_crawled": 2, "pages_total": 2, "cookies_found": 1},
+    ]
+    final = events[2]
+    assert final["type"] == "result"
+    assert final["pages_crawled"] == 2
+    assert [c["name"] for c in final["cookies"]] == ["_ga"]
+    assert len(events) == 3
+
+
+@patch("src.crawler.CookieCrawler.crawl_site")
+def test_scan_stream_reports_crawl_failure(mock_crawl, client):
+    """A crash during the crawl ends the stream with an error line."""
+    mock_crawl.side_effect = RuntimeError("browser crashed")
+
+    resp = client.post(
+        "/scan/stream",
+        json={"domain": "example.com", "urls": ["https://example.com/"]},
+    )
+    assert resp.status_code == 200
+    assert _stream_events(resp) == [{"type": "error", "detail": "browser crashed"}]
+
+
+def test_scan_stream_rejects_invalid_domain_before_streaming(client):
+    """Request errors are plain HTTP errors, not stream lines."""
+    resp = client.post("/scan/stream", json={"domain": "not a domain"})
+    assert resp.status_code == 400

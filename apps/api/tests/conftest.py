@@ -286,6 +286,7 @@ async def create_test_site(
     *,
     domain_prefix: str = "test",
     display_name: str = "Test Site",
+    start_scan: bool = True,
 ) -> str:
     """Create a site via the API and return its ID.
 
@@ -297,6 +298,7 @@ async def create_test_site(
         json={
             "domain": f"{domain_prefix}-{uuid.uuid4().hex[:8]}.com",
             "display_name": display_name,
+            "start_scan": start_scan,
         },
         headers=headers,
     )

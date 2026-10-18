@@ -8,8 +8,11 @@ computes diffs against the previous scan.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 import httpx
@@ -17,14 +20,22 @@ import httpx
 from src.celery_app import app
 
 if TYPE_CHECKING:
+    from src.models.scan import ScanJob
     from src.models.site import Site
 
 logger = logging.getLogger(__name__)
 
+# Progress lines arrive once per page; write at most this often.
+PROGRESS_INTERVAL_SECONDS = 2.0
+
 
 @app.task(name="src.tasks.scanner.run_scan", bind=True, max_retries=2)
-def run_scan(self, scan_job_id: str, site_id: str) -> dict:
+def run_scan(self, scan_job_id: str, site_id: str, max_pages: int | None = None) -> dict:
     """Execute a scan job by calling the scanner service.
+
+    ``max_pages`` is the requested page limit. It travels with the task
+    because progress updates overwrite the job's ``pages_total`` with the
+    number of pages the scanner found, and a retry needs the original.
 
     1. Transition job to 'running'
     2. Look up site domain
@@ -44,6 +55,7 @@ def run_scan(self, scan_job_id: str, site_id: str) -> dict:
     from src.services.classification import classify_single_cookie
     from src.services.scanner import (
         add_scan_result,
+        apply_scan_progress,
         complete_scan_job,
         start_scan_job,
         sync_scan_results_to_cookies,
@@ -73,19 +85,30 @@ def run_scan(self, scan_job_id: str, site_id: str) -> dict:
                 await start_scan_job(db, job)
                 await db.commit()
 
-                # Call the scanner service
-                scanner_url = f"{settings.scanner_service_url}/scan"
-                max_pages = job.pages_total or 50
+                # Call the scanner service, recording progress as it goes
+                scanner_url = f"{settings.scanner_service_url}/scan/stream"
+                page_limit = scan_page_limit(max_pages, job)
+                last_write = 0.0
+
+                async def on_progress(event: dict) -> None:
+                    nonlocal last_write
+                    now = time.monotonic()
+                    finished = event.get("pages_crawled") == event.get("pages_total")
+                    if not finished and now - last_write < PROGRESS_INTERVAL_SECONDS:
+                        return
+                    apply_scan_progress(job, event)
+                    await db.commit()
+                    last_write = now
 
                 async with httpx.AsyncClient(
                     timeout=httpx.Timeout(settings.scanner_timeout_seconds)
                 ) as client:
-                    resp = await client.post(
+                    scan_data = await stream_scan(
+                        client,
                         scanner_url,
-                        json=build_scan_payload(site, max_pages),
+                        build_scan_payload(site, page_limit),
+                        on_progress,
                     )
-                    resp.raise_for_status()
-                    scan_data = resp.json()
 
                 # Store scan results
                 cookies = scan_data.get("cookies", [])
@@ -175,6 +198,44 @@ def run_scan(self, scan_job_id: str, site_id: str) -> dict:
     return asyncio.run(_execute())
 
 
+class ScannerReportedError(Exception):
+    """The scanner ran but reported that the crawl failed."""
+
+
+async def stream_scan(
+    client: httpx.AsyncClient,
+    url: str,
+    payload: dict,
+    on_progress: Callable[[dict], Awaitable[None]],
+) -> dict:
+    """Run a scan through the scanner's streaming endpoint.
+
+    Calls ``on_progress`` for each progress line and returns the final
+    result, which has the same shape as the non-streaming ``/scan``
+    response.
+    """
+    async with client.stream("POST", url, json=payload) as resp:
+        resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            if not line.strip():
+                continue
+            event = json.loads(line)
+            kind = event.get("type")
+            if kind == "progress":
+                await on_progress(event)
+            elif kind == "result":
+                return event
+            elif kind == "error":
+                raise ScannerReportedError(event.get("detail") or "The scan failed")
+    # The connection closed early, e.g. the scanner restarted: retryable.
+    raise httpx.RemoteProtocolError("The scanner stopped before reporting a result")
+
+
+def scan_page_limit(requested: int | None, job: ScanJob) -> int:
+    """The page limit for a scan, falling back to the job for tasks queued without one."""
+    return requested or job.pages_total or 50
+
+
 def build_scan_payload(site: Site, max_pages: int) -> dict:
     """Build the scanner ``/scan`` request body for *site*."""
     return {
@@ -213,7 +274,14 @@ def check_scheduled_scans() -> dict:
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
     from src.config.settings import get_settings
-    from src.services.scanner import create_scan_job, get_sites_due_for_scan
+    from src.schemas.scanner import ScanTrigger
+    from src.services.scanner import (
+        ScanDispatchError,
+        ScanInProgressError,
+        configured_max_pages,
+        get_sites_due_for_scan,
+        start_scan,
+    )
 
     settings = get_settings()
 
@@ -225,10 +293,18 @@ def check_scheduled_scans() -> dict:
                 triggered = 0
 
                 for site in sites:
-                    job = await create_scan_job(db, site_id=site.id, trigger="scheduled")
-                    await db.commit()
-                    # Dispatch the scan task
-                    run_scan.delay(str(job.id), str(site.id))
+                    try:
+                        await start_scan(
+                            db,
+                            site_id=site.id,
+                            trigger=ScanTrigger.SCHEDULED,
+                            max_pages=await configured_max_pages(db, site.id),
+                        )
+                    except ScanInProgressError:
+                        continue
+                    except ScanDispatchError:
+                        # Left pending: recover_stale_scans re-dispatches it.
+                        continue
                     triggered += 1
 
                 return {"sites_checked": len(sites), "scans_triggered": triggered}
@@ -246,17 +322,17 @@ def recover_stale_scans() -> dict:
     """Periodic task: detect and recover scan jobs stuck in pending/running.
 
     - Jobs stuck in 'pending' for >5 minutes are re-dispatched to Celery.
-    - Jobs stuck in 'running' for >10 minutes are marked as failed.
+    - Running jobs with no progress for >10 minutes are marked as failed.
     """
     import asyncio
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime
 
     from sqlalchemy import or_, select
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
     from src.config.settings import get_settings
     from src.models.scan import ScanJob
-    from src.services.scanner import complete_scan_job
+    from src.services.scanner import STALE_PENDING, STALE_RUNNING, complete_scan_job
 
     settings = get_settings()
 
@@ -265,18 +341,18 @@ def recover_stale_scans() -> dict:
         async with AsyncSession(engine, expire_on_commit=False) as db:
             try:
                 now = datetime.now(UTC)
-                stale_pending_cutoff = now - timedelta(minutes=5)
-                stale_running_cutoff = now - timedelta(minutes=10)
+                stale_pending_cutoff = now - STALE_PENDING
+                stale_running_cutoff = now - STALE_RUNNING
 
                 result = await db.execute(
                     select(ScanJob).where(
                         or_(
-                            # Pending too long — likely never picked up
+                            # Pending too long, likely never picked up
                             (ScanJob.status == "pending")
                             & (ScanJob.created_at < stale_pending_cutoff),
-                            # Running too long — likely worker died
+                            # No progress for too long, likely the worker died
                             (ScanJob.status == "running")
-                            & (ScanJob.started_at < stale_running_cutoff),
+                            & (ScanJob.updated_at < stale_running_cutoff),
                         )
                     )
                 )
@@ -298,7 +374,7 @@ def recover_stale_scans() -> dict:
                             db,
                             job,
                             error_message=(
-                                "Job timed out (running too long, worker may have crashed)"
+                                "Job timed out (no progress for too long, worker may have crashed)"
                             ),
                         )
                         failed += 1

@@ -109,6 +109,8 @@ To hold back your own third-party scripts until the visitor consents, tag them w
 
 Configuration changes go live when you publish them, and each publish is kept so you can roll back. See [docs/publishing.md](docs/publishing.md).
 
+New sites are scanned for cookies as soon as they are added. See [docs/scanning.md](docs/scanning.md).
+
 ### Upgrading from PostgreSQL 16
 
 The dev compose ships `postgres:17-alpine`. If your `consentos_pgdata` volume was initialised on an earlier major (e.g. `postgres:16-alpine`), the postgres container fails to start with:

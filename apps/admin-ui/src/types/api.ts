@@ -303,7 +303,7 @@ export interface ScanJob {
   id: string;
   site_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
-  trigger: 'manual' | 'scheduled' | 'client_report';
+  trigger: 'manual' | 'initial' | 'scheduled' | 'client_report';
   pages_scanned: number;
   pages_total: number | null;
   cookies_found: number;
