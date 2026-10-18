@@ -93,7 +93,10 @@ The bootstrapped user is also made a [platform admin](#platform-admins).
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CDN_BASE_URL` | Yes | `http://localhost:5173` | Public URL where `consent-loader.js` and `consent-bundle.js` are hosted. In the default Docker Compose deployment, this is the same origin as the admin UI (the admin-ui image bundles the banner at its nginx root). |
+| `CDN_BASE_URL` | No | Unset | Public URL where `consent-loader.js` and `consent-bundle.js` are hosted. The install snippet in the admin UI loads the banner from here. Unset, the snippet uses the admin UI's own address, which is right in the default Docker Compose deployment, where the admin-ui image bundles the banner at its nginx root. |
+| `PUBLIC_API_URL` | No | Unset | Public URL browsers use to reach the API, used as `data-api-base` in the install snippet. Unset, the snippet uses the admin UI's own address, which is right when the admin UI proxies `/api`, as in the default deployments. On Kubernetes, set it through `api.env`. |
+
+When `CDN_BASE_URL` and `PUBLIC_API_URL` differ, the snippet adds `data-cdn-base`, so the loader fetches the rest of the banner from the CDN rather than the API.
 
 ### GeoIP
 
@@ -279,6 +282,8 @@ server {
 **Forwarded client IPs.** The API only reads `X-Forwarded-For` / `X-Real-IP` when the connecting peer is listed in `TRUSTED_PROXIES`; otherwise it uses the peer address. With the Docker Compose stack, requests from a host proxy arrive via the Docker bridge gateway and requests proxied by the admin UI's nginx come from its container, so set `TRUSTED_PROXIES` to cover your Docker networks (the default bridge pools sit in `172.16.0.0/12`; check with `docker network inspect`). If another proxy or CDN sits in front of this one, add its address ranges too, since `X-Forwarded-For` is walked from the right and the first untrusted hop is taken as the client.
 
 ### 1.6 Integrate the banner
+
+Each site's **Overview** in the admin UI shows its install snippet, with instructions for any site, WordPress and Shopify. See [Installing the banner](installing.md).
 
 Add the loader to every page on your customer site, **as the very first `<script>` in `<head>`** — no `async`, no `defer`:
 
@@ -703,6 +708,10 @@ Saving configuration no longer changes what visitors see. Edits build up in a dr
 
 **Caching.** `GET /config/sites/{id}/geo-resolved` now only changes when someone publishes. Responses for a draft preview link are sent with `Cache-Control: no-store`.
 
+### Install snippet addresses
+
+The install snippet on a site's **Overview** now comes from `CDN_BASE_URL` and the new `PUBLIC_API_URL`, instead of always using the admin UI's address. `CDN_BASE_URL` was previously unused, so check it before upgrading: if it is set to an address that doesn't serve `consent-loader.js`, the snippet will be wrong. Snippets already on your sites keep working. The Helm chart's `cdn.baseUrl` used to default to `https://cdn.example.com` and now defaults to empty, so leave it empty unless the banner is served from somewhere other than the admin UI.
+
 ### Scans report their progress
 
 The API now runs scans through the scanner's `POST /scan/stream` endpoint, which reports progress after each page, instead of `POST /scan`. **Upgrade the scanner and the API together**: an API on this version can't run scans against an older scanner. `POST /scan` is unchanged for anything else that calls it.
@@ -738,7 +747,8 @@ Regardless of deployment method, verify these before going live:
 - [ ] `data-site-id` and `data-api-base` attributes are set correctly on the script tag.
 - [ ] Every domain that serves the site is listed as its primary domain or one of its additional domains; consent and cookie reports from other domains are rejected.
 - [ ] The API's `ALLOWED_ORIGINS` includes every customer site origin that embeds the banner.
-- [ ] `CDN_BASE_URL` points at the origin where `consent-loader.js` and `consent-bundle.js` are served (same as the admin UI in a standard deployment).
+- [ ] `CDN_BASE_URL` points at the origin where `consent-loader.js` and `consent-bundle.js` are served, or is unset when the admin UI serves them.
+- [ ] `PUBLIC_API_URL` is the address browsers use to reach the API, or is unset when the admin UI proxies it.
 - [ ] Google Tag Manager (if used) is loaded **after** the ConsentOS loader, not before.
 - [ ] The consent cookie (`_consentos_consent`) is accessible on the customer domain — check that `SameSite=Lax` and the domain/path are correct.
 - [ ] Regional modes are configured in the admin UI for any site that needs location-aware consent (e.g. opt-in for EU, opt-out for US-CA).

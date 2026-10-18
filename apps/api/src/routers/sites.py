@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config.settings import get_settings
 from src.db import get_db
 from src.models.site import Site
 from src.models.site_config import SiteConfig
@@ -16,6 +17,7 @@ from src.schemas.site import (
     SiteConfigResponse,
     SiteConfigUpdate,
     SiteCreate,
+    SiteInstallResponse,
     SiteResponse,
     SiteUpdate,
 )
@@ -124,6 +126,29 @@ async def get_site(
     """Get a specific site by ID."""
     site = await _get_org_site(site_id, current_user.organisation_id, db)
     return site
+
+
+@router.get("/{site_id}/install", response_model=SiteInstallResponse)
+async def get_site_install(
+    site_id: uuid.UUID,
+    current_user: CurrentUser = Depends(require_role("owner", "admin", "editor", "viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> SiteInstallResponse:
+    """The addresses and domains the site's install snippet needs."""
+    site = await _get_org_site(site_id, current_user.organisation_id, db)
+    settings = get_settings()
+    return SiteInstallResponse(
+        api_base=_base_url(settings.public_api_url),
+        cdn_base=_base_url(settings.cdn_base_url),
+        domains=[site.domain, *(site.additional_domains or [])],
+    )
+
+
+def _base_url(value: str | None) -> str | None:
+    """A configured base URL without its trailing slash, or None if unset."""
+    if value is None:
+        return None
+    return value.strip().rstrip("/") or None
 
 
 @router.patch("/{site_id}", response_model=SiteResponse)

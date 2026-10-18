@@ -42,8 +42,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "consentos.secretName" . }}
                   key: jwt-secret-key
+            {{- with .Values.cdn.baseUrl }}
             - name: CDN_BASE_URL
-              value: {{ .Values.cdn.baseUrl | quote }}
+              value: {{ . | quote }}
+            {{- end }}
             {{- range $key, $value := .Values.api.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}

@@ -1,4 +1,4 @@
-import type { ConfigInheritanceResponse, Site, SiteConfig } from '../types/api';
+import type { ConfigInheritanceResponse, Site, SiteConfig, SiteInstall } from '../types/api';
 import apiClient from './client';
 
 export async function listSites(): Promise<Site[]> {
@@ -17,6 +17,11 @@ export async function createSite(body: {
   site_group_id?: string;
 }): Promise<Site> {
   const { data } = await apiClient.post<Site>('/sites/', body);
+  return data;
+}
+
+export async function getSiteInstall(id: string): Promise<SiteInstall> {
+  const { data } = await apiClient.get<SiteInstall>(`/sites/${id}/install`);
   return data;
 }
 

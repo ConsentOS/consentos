@@ -133,7 +133,8 @@ secrets:
 
 # ── CDN ──────────────────────────────────────────────────────────────
 cdn:
-  baseUrl: "https://cdn.example.com"
+  # Where consent-loader.js is served, if not from the admin UI.
+  baseUrl: ""
 
 # ── Image pull secrets ───────────────────────────────────────────────
 imagePullSecrets: []
