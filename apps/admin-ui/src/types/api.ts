@@ -307,6 +307,30 @@ export interface SiteInstall {
   domains: string[];
 }
 
+export type SetupStepKey = 'scan' | 'review' | 'banner' | 'publish' | 'install' | 'verify';
+
+export interface SetupStep {
+  key: SetupStepKey;
+  status: 'todo' | 'in_progress' | 'done';
+  detail: string;
+}
+
+export interface SiteSetup {
+  steps: SetupStep[];
+  done: number;
+  total: number;
+  complete: boolean;
+  dismissed: boolean;
+}
+
+export interface SiteSetupSummary {
+  site_id: string;
+  done: number;
+  total: number;
+  complete: boolean;
+  dismissed: boolean;
+}
+
 export type InstallationState = 'not_detected' | 'installed' | 'problem';
 
 export interface InstallationCheckItem {

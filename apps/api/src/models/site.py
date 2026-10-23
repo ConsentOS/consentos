@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,6 +43,15 @@ class Site(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
             name="fk_sites_live_revision_id",
         ),
         nullable=True,
+    )
+    # Setup checklist: when the owner confirmed or edited the banner, the
+    # one step that can't be worked out from the site's data, and when
+    # they dismissed the finished checklist.
+    banner_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    setup_dismissed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Relationships

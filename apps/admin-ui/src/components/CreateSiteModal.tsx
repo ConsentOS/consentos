@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { listSiteGroups } from '../api/site-groups';
 import { createSite } from '../api/sites';
@@ -19,6 +20,7 @@ interface Props {
 
 export default function CreateSiteModal({ onClose, defaultGroupId }: Props) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [domain, setDomain] = useState('');
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState(defaultGroupId ?? '');
@@ -31,11 +33,13 @@ export default function CreateSiteModal({ onClose, defaultGroupId }: Props) {
 
   const mutation = useMutation({
     mutationFn: createSite,
-    onSuccess: () => {
+    onSuccess: (site) => {
       queryClient.invalidateQueries({ queryKey: ['sites'] });
       queryClient.invalidateQueries({ queryKey: ['site-groups'] });
       trackFeatureUsage('site', 'create');
       onClose();
+      // Straight to the new site, where its setup checklist starts.
+      navigate(`/sites/${site.id}`);
     },
     onError: () => {
       setError('Failed to create site. Check the domain is unique.');

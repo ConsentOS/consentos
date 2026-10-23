@@ -3,9 +3,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { deleteSite } from '../api/sites';
+import { useSiteSetup } from '../hooks/useSiteSetup';
 import InstallationStatus from './InstallationStatus';
 import InstallGuide from './InstallGuide';
 import LiveRevisionCard from './LiveRevisionCard';
+import SetupChecklist from './SetupChecklist';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { MetricCard } from './ui/metric-card';
@@ -18,6 +20,8 @@ interface Props {
 }
 
 export default function SiteOverviewTab({ site, config }: Props) {
+  const { data: setup } = useSiteSetup(site.id);
+  const settingUp = setup !== undefined && !setup.dismissed;
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState('');
 
@@ -39,6 +43,8 @@ export default function SiteOverviewTab({ site, config }: Props) {
 
   return (
     <div className="space-y-6">
+      <SetupChecklist site={site} />
+
       {/* Status cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <MetricCard
@@ -59,17 +65,22 @@ export default function SiteOverviewTab({ site, config }: Props) {
 
       <LiveRevisionCard siteId={site.id} />
 
-      <Card className="p-6">
-        <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">Installation</h3>
-        <InstallationStatus siteId={site.id} />
-      </Card>
+      {/* While the checklist is showing, installation lives in its steps. */}
+      {!settingUp && (
+        <>
+          <Card className="p-6">
+            <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">Installation</h3>
+            <InstallationStatus siteId={site.id} />
+          </Card>
 
-      <Card className="p-6">
-        <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">
-          Install on your site
-        </h3>
-        <InstallGuide site={site} />
-      </Card>
+          <Card className="p-6">
+            <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">
+              Install on your site
+            </h3>
+            <InstallGuide site={site} />
+          </Card>
+        </>
+      )}
 
       {/* Features */}
       <Card className="p-6">

@@ -708,6 +708,10 @@ Saving configuration no longer changes what visitors see. Edits build up in a dr
 
 **Caching.** `GET /config/sites/{id}/geo-resolved` now only changes when someone publishes. Responses for a draft preview link are sent with `Cache-Control: no-store`.
 
+### Setup checklist
+
+Migration `0015` adds two columns to `sites` for the setup checklist that new sites show on their **Overview**. Sites that already have a published configuration are marked as set up, so they don't show it. See [Setting up a site](setting-up-a-site.md).
+
 ### Installation checks
 
 Migration `0014` adds the `site_installations` table, which records when the banner was last seen on each site and the result of the last installation check. It runs with the others on startup and needs no manual steps.
