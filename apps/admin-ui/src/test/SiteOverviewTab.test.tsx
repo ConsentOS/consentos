@@ -11,6 +11,26 @@ const mockNavigate = vi.fn();
 
 vi.mock('../api/sites', () => ({
   deleteSite: (id: string) => mockDeleteSite(id),
+  getSiteInstall: () =>
+    Promise.resolve({ api_base: null, cdn_base: null, domains: ['example.com'] }),
+}));
+
+vi.mock('../api/installation', () => ({
+  getInstallation: () =>
+    Promise.resolve({
+      state: 'not_detected',
+      first_seen_at: null,
+      last_seen_at: null,
+      last_seen_url: null,
+      last_check_at: null,
+      last_check: null,
+    }),
+  checkInstallation: vi.fn(),
+}));
+
+vi.mock('../api/setup', () => ({
+  getSiteSetup: () =>
+    Promise.resolve({ steps: [], done: 6, total: 6, complete: true, dismissed: true }),
 }));
 
 vi.mock('../api/revisions', () => ({
@@ -39,6 +59,7 @@ const TEST_SITE: Site = {
   name: 'Example',
   display_name: 'Example',
   is_active: true,
+  additional_domains: null,
   site_group_id: null,
   live_revision_id: 'rev-1',
   created_at: '2026-01-01T00:00:00Z',

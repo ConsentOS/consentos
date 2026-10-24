@@ -3,7 +3,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { deleteSite } from '../api/sites';
+import { useSiteSetup } from '../hooks/useSiteSetup';
+import InstallationStatus from './InstallationStatus';
+import InstallGuide from './InstallGuide';
 import LiveRevisionCard from './LiveRevisionCard';
+import SetupChecklist from './SetupChecklist';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { MetricCard } from './ui/metric-card';
@@ -16,8 +20,8 @@ interface Props {
 }
 
 export default function SiteOverviewTab({ site, config }: Props) {
-  const scriptTag = `<script src="${window.location.origin}/consent-loader.js" data-site-id="${site.id}" data-api-base="${window.location.origin}"></script>`;
-  const [copied, setCopied] = useState(false);
+  const { data: setup } = useSiteSetup(site.id);
+  const settingUp = setup !== undefined && !setup.dismissed;
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState('');
 
@@ -39,6 +43,8 @@ export default function SiteOverviewTab({ site, config }: Props) {
 
   return (
     <div className="space-y-6">
+      <SetupChecklist site={site} />
+
       {/* Status cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <MetricCard
@@ -59,45 +65,22 @@ export default function SiteOverviewTab({ site, config }: Props) {
 
       <LiveRevisionCard siteId={site.id} />
 
-      {/* Integration snippet */}
-      <Card className="p-6">
-        <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">Integration snippet</h3>
-        <p className="mb-3 text-sm text-text-secondary">
-          Add this script tag to the {'<head>'} of your website, before any other scripts.
-        </p>
-        <div className="flex items-stretch">
-          <input
-            type="text"
-            readOnly
-            value={scriptTag}
-            className="block w-full min-w-0 rounded-l-lg border border-r-0 border-border bg-mist px-3 py-2.5 font-mono text-xs text-foreground focus:outline-none"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              navigator.clipboard.writeText(scriptTag).then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              });
-            }}
-            className="inline-flex shrink-0 items-center gap-2 rounded-r-lg border border-copper bg-copper px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-copper/90 focus:outline-none focus:ring-2 focus:ring-copper/50"
-          >
-            {copied ? (
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 6 9 17l-5-5" />
-              </svg>
-            ) : (
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="M15 4h3a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3m0 3h6m-3 5h3m-6 0h.01M12 16h3m-6 0h.01M10 3v4h4V3h-4Z" />
-              </svg>
-            )}
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-        </div>
-        <p className="mt-2 text-xs text-text-secondary">
-          Must be the first {'<script>'} in {'<head>'}, with no <code>async</code> or <code>defer</code>.
-        </p>
-      </Card>
+      {/* While the checklist is showing, installation lives in its steps. */}
+      {!settingUp && (
+        <>
+          <Card className="p-6">
+            <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">Installation</h3>
+            <InstallationStatus siteId={site.id} />
+          </Card>
+
+          <Card className="p-6">
+            <h3 className="font-heading mb-3 text-sm font-semibold text-foreground">
+              Install on your site
+            </h3>
+            <InstallGuide site={site} />
+          </Card>
+        </>
+      )}
 
       {/* Features */}
       <Card className="p-6">

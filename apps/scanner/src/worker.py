@@ -7,11 +7,18 @@ worker to execute scan jobs.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from src.crawler import SiteCrawlResult
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +128,73 @@ class ValidationResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+def build_scan_response(result: SiteCrawlResult) -> ScanResponse:
+    """Turn a crawl result into the ``/scan`` response body."""
+    cookies = [
+        DiscoveredCookieResponse(
+            name=c.name,
+            domain=c.domain,
+            storage_type=c.storage_type,
+            path=c.path,
+            expires=c.expires,
+            http_only=c.http_only,
+            secure=c.secure,
+            same_site=c.same_site,
+            value_length=c.value_length,
+            script_source=c.script_source,
+            page_url=c.page_url,
+            initiator_chain=c.initiator_chain,
+        )
+        for c in result.unique_cookies
+    ]
+    return ScanResponse(
+        domain=result.domain,
+        pages_crawled=len(result.pages),
+        total_cookies=result.total_cookies_found,
+        cookies=cookies,
+        errors=[p.error for p in result.pages if p.error],
+    )
+
+
+class CheckInstallRequest(BaseModel):
+    """Load a page and report how the banner is installed on it."""
+
+    url: str
+
+
+class LoaderTagResponse(BaseModel):
+    src: str
+    site_id: str | None
+    api_base: str | None
+    cdn_base: str | None
+    is_async: bool
+    is_defer: bool
+    in_head: bool
+    first_script: bool
+
+
+class ConfigRequestResponse(BaseModel):
+    url: str
+    status: int | None
+
+
+class CheckInstallResponse(BaseModel):
+    url: str
+    final_url: str | None = None
+    reachable: bool
+    error: str | None = None
+    loader: LoaderTagResponse | None = None
+    config_requests: list[ConfigRequestResponse] = Field(default_factory=list)
+    banner_rendered: bool
+
+
 # ── Application ──────────────────────────────────────────────────────
 
 
 def create_app():  # noqa: ANN201
     """Create the scanner FastAPI application."""
     from fastapi import FastAPI, HTTPException
+    from fastapi.responses import StreamingResponse
 
     from src.crawler import CookieCrawler
     from src.navigation import (
@@ -146,14 +214,14 @@ def create_app():  # noqa: ANN201
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/scan", response_model=ScanResponse)
-    async def run_scan(body: ScanRequest) -> ScanResponse:
-        """Execute a Playwright crawl and return discovered cookies."""
+    async def _prepare_scan(body: ScanRequest) -> tuple[list[str], CookieCrawler, int]:
+        """Validate a scan request and work out what to crawl and how."""
         if not is_valid_hostname(body.domain, allow_port=settings.scanner_allow_private_networks):
             raise HTTPException(status_code=400, detail="Invalid domain")
         domain = normalise_domain(body.domain)
         domains = site_domains(domain, body.additional_domains)
         policy = NavigationPolicy(allow_private_networks=settings.scanner_allow_private_networks)
+        max_pages = min(body.max_pages, settings.max_pages_per_scan)
 
         # Discover URLs if none provided
         urls = filter_site_urls(body.urls, domains)
@@ -161,7 +229,7 @@ def create_app():  # noqa: ANN201
             try:
                 urls = await discover_urls(
                     domain,
-                    max_urls=min(body.max_pages, settings.max_pages_per_scan),
+                    max_urls=max_pages,
                     additional_domains=body.additional_domains,
                     policy=policy,
                 )
@@ -172,7 +240,6 @@ def create_app():  # noqa: ANN201
         if not urls:
             raise HTTPException(status_code=400, detail="No URLs to scan")
 
-        # Run crawler
         from src.crawler import ProxyConfig
 
         proxy_config = None
@@ -189,38 +256,81 @@ def create_app():  # noqa: ANN201
             proxy=proxy_config,
             navigation_policy=policy,
         )
-        result = await crawler.crawl_site(
-            urls, max_pages=min(body.max_pages, settings.max_pages_per_scan)
-        )
+        return urls, crawler, max_pages
 
-        # Build response
-        cookies = [
-            DiscoveredCookieResponse(
-                name=c.name,
-                domain=c.domain,
-                storage_type=c.storage_type,
-                path=c.path,
-                expires=c.expires,
-                http_only=c.http_only,
-                secure=c.secure,
-                same_site=c.same_site,
-                value_length=c.value_length,
-                script_source=c.script_source,
-                page_url=c.page_url,
-                initiator_chain=c.initiator_chain,
+    @app.post("/scan", response_model=ScanResponse)
+    async def run_scan(body: ScanRequest) -> ScanResponse:
+        """Execute a Playwright crawl and return discovered cookies."""
+        urls, crawler, max_pages = await _prepare_scan(body)
+        result = await crawler.crawl_site(urls, max_pages=max_pages)
+        return build_scan_response(result)
+
+    @app.post("/scan/stream")
+    async def run_scan_stream(body: ScanRequest) -> StreamingResponse:
+        """Execute a crawl, reporting progress as newline-delimited JSON.
+
+        Each crawled page produces a ``progress`` line. The last line is
+        either ``result``, carrying the same body as ``/scan``, or
+        ``error``. Request errors are still returned as HTTP errors,
+        because they are found before streaming starts.
+        """
+        urls, crawler, max_pages = await _prepare_scan(body)
+        events: asyncio.Queue[dict | None] = asyncio.Queue()
+
+        async def on_page(partial: SiteCrawlResult, pages_total: int) -> None:
+            await events.put(
+                {
+                    "type": "progress",
+                    "pages_crawled": len(partial.pages),
+                    "pages_total": pages_total,
+                    "cookies_found": len(partial.unique_cookies),
+                }
             )
-            for c in result.unique_cookies
-        ]
 
-        errors = [p.error for p in result.pages if p.error]
+        async def crawl() -> None:
+            try:
+                result = await crawler.crawl_site(urls, max_pages=max_pages, on_page=on_page)
+                await events.put(
+                    {"type": "result", **build_scan_response(result).model_dump(mode="json")}
+                )
+            except Exception as exc:
+                logger.exception("Streamed scan failed for %s", body.domain)
+                await events.put({"type": "error", "detail": str(exc)})
+            finally:
+                await events.put(None)
 
-        return ScanResponse(
-            domain=result.domain,
-            pages_crawled=len(result.pages),
-            total_cookies=result.total_cookies_found,
-            cookies=cookies,
-            errors=errors,
+        async def lines() -> AsyncIterator[str]:
+            task = asyncio.create_task(crawl())
+            try:
+                while (event := await events.get()) is not None:
+                    yield json.dumps(event) + "\n"
+            finally:
+                # The client went away mid-scan: stop crawling for it.
+                if not task.done():
+                    task.cancel()
+
+        return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+    @app.post("/check-install", response_model=CheckInstallResponse)
+    async def run_check_install(body: CheckInstallRequest) -> CheckInstallResponse:
+        """Load a page as a first-time visitor and report on the banner."""
+        from dataclasses import asdict
+
+        from src.install_check import check_install
+
+        if urlparse(body.url).scheme not in ALLOWED_SCHEMES:
+            raise HTTPException(status_code=400, detail="URL must use http or https")
+        policy = NavigationPolicy(allow_private_networks=settings.scanner_allow_private_networks)
+        if not await policy.is_allowed(body.url):
+            raise HTTPException(status_code=400, detail="URL is not permitted")
+
+        result = await check_install(
+            body.url,
+            headless=settings.crawler_headless,
+            timeout_ms=settings.crawler_timeout_ms,
+            policy=policy,
         )
+        return CheckInstallResponse.model_validate(asdict(result))
 
     @app.post("/validate", response_model=ValidationResponse)
     async def run_validation(body: ValidationRequest) -> ValidationResponse:

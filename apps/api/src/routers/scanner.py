@@ -7,7 +7,7 @@ provides scan job management (trigger, list, detail, diff).
 
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
@@ -24,12 +24,15 @@ from src.schemas.scanner import (
     ScanDiffResponse,
     ScanJobDetailResponse,
     ScanJobResponse,
+    ScanTrigger,
     TriggerScanRequest,
 )
 from src.services.dependencies import get_current_user
 from src.services.scanner import (
+    ScanDispatchError,
+    ScanInProgressError,
     compute_scan_diff,
-    create_scan_job,
+    start_scan,
 )
 from src.services.site_domains import (
     host_matches_site,
@@ -171,72 +174,18 @@ async def trigger_scan(
     Creates a scan job in 'pending' state and dispatches it to the
     Celery worker queue for execution.
     """
-    from src.services.scanner import complete_scan_job
-
     await _verify_site_access(body.site_id, user, db)
 
-    # Check for an already-running scan
-    active_result = await db.execute(
-        select(ScanJob).where(
-            ScanJob.site_id == body.site_id,
-            ScanJob.status.in_(["pending", "running"]),
-        )
-    )
-    active_jobs = list(active_result.scalars().all())
-
-    now = datetime.now(UTC)
-    stale_pending_cutoff = now - timedelta(minutes=5)
-    stale_running_cutoff = now - timedelta(minutes=10)
-
-    for active_job in active_jobs:
-        is_stale_pending = (
-            active_job.status == "pending"
-            and active_job.created_at.replace(tzinfo=UTC) < stale_pending_cutoff
-        )
-        is_stale_running = (
-            active_job.status == "running"
-            and active_job.started_at
-            and active_job.started_at.replace(tzinfo=UTC) < stale_running_cutoff
-        )
-        if is_stale_pending or is_stale_running:
-            logger.warning(
-                "Failing stale %s scan job %s for site %s",
-                active_job.status,
-                active_job.id,
-                body.site_id,
-            )
-            await complete_scan_job(
-                db,
-                active_job,
-                error_message=(
-                    f"Job was stale ({active_job.status} too long), superseded by new scan"
-                ),
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="A scan is already in progress for this site",
-            )
-
-    job = await create_scan_job(
-        db,
-        site_id=body.site_id,
-        trigger="manual",
-        max_pages=body.max_pages,
-    )
-
-    # Commit before dispatching to Celery so the worker can find the
-    # job in the database immediately (avoids race condition).
-    await db.commit()
-
-    # Dispatch to Celery (import here to avoid import at module level
-    # when Celery broker is unavailable during testing)
     try:
-        from src.tasks.scanner import run_scan
-
-        run_scan.delay(str(job.id), str(body.site_id))
-    except Exception:
-        logger.exception("Failed to dispatch scan job %s to Celery", job.id)
+        return await start_scan(
+            db, site_id=body.site_id, trigger=ScanTrigger.MANUAL, max_pages=body.max_pages
+        )
+    except ScanInProgressError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A scan is already in progress for this site",
+        ) from None
+    except ScanDispatchError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
@@ -244,8 +193,6 @@ async def trigger_scan(
                 " created but cannot be processed. Please try again later."
             ),
         ) from None
-
-    return job
 
 
 @router.get("/scans/site/{site_id}", response_model=list[ScanJobResponse])

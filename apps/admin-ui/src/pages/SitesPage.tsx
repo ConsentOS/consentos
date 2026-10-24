@@ -3,8 +3,12 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { createSiteGroup, deleteSiteGroup, listSiteGroups } from '../api/site-groups';
+import { listInstallations } from '../api/installation';
+import { listSetupSummaries } from '../api/setup';
 import { listSites, updateSite } from '../api/sites';
-import CreateSiteModal from '../components/CreateSiteModal';
+import CreateSiteModal, { CreateSiteForm } from '../components/CreateSiteModal';
+import { Card } from '../components/ui/card.tsx';
+import { InstallationBadge } from '../components/InstallationStatus';
 import { Button } from '../components/ui/button.tsx';
 import { Badge } from '../components/ui/badge.tsx';
 import { Modal } from '../components/ui/modal.tsx';
@@ -13,7 +17,7 @@ import { Input } from '../components/ui/input.tsx';
 import { Alert } from '../components/ui/alert.tsx';
 import { EmptyState } from '../components/ui/empty-state.tsx';
 import { LoadingState } from '../components/ui/loading-state.tsx';
-import type { Site, SiteGroup } from '../types/api';
+import type { InstallationSummary, Site, SiteGroup, SiteSetupSummary } from '../types/api';
 
 export default function SitesPage() {
   const queryClient = useQueryClient();
@@ -108,7 +112,16 @@ export default function SitesPage() {
       )}
 
       {!isLoading && sites && sites.length === 0 && (!groups || groups.length === 0) && (
-        <EmptyState message="No sites yet. Add your first site to get started." />
+        <Card className="mx-auto max-w-lg p-6">
+          <h2 className="font-heading text-lg font-semibold text-foreground">
+            Add your first site
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-text-secondary">
+            Enter your website's domain. We'll scan it for cookies and guide you through
+            setting up its banner.
+          </p>
+          <CreateSiteForm />
+        </Card>
       )}
 
       {!isLoading && (
@@ -281,6 +294,17 @@ function SiteTable({
   onRemoveFromGroup?: (siteId: string) => void;
   onAssignGroup?: (siteId: string, groupId: string) => void;
 }) {
+  const { data: installations } = useQuery({
+    queryKey: ['installations'],
+    queryFn: listInstallations,
+  });
+  const { data: setups } = useQuery({
+    queryKey: ['setup-summaries'],
+    queryFn: listSetupSummaries,
+  });
+  const installationOf = (siteId: string) => installations?.find((i) => i.site_id === siteId);
+  const setupOf = (siteId: string) => setups?.find((s) => s.site_id === siteId);
+
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       {/* Desktop table */}
@@ -306,7 +330,7 @@ function SiteTable({
                   {site.display_name ?? site.name ?? '-'}
                 </td>
                 <td className="px-4 py-3 lg:px-6">
-                  <SiteStatus site={site} />
+                  <SiteStatus site={site} installation={installationOf(site.id)} setup={setupOf(site.id)} />
                 </td>
                 <td className="hidden px-4 py-3 text-sm text-text-secondary md:table-cell lg:px-6">
                   {new Date(site.created_at).toLocaleDateString()}
@@ -346,7 +370,7 @@ function SiteTable({
                 </p>
               </div>
               <div className="ml-2 shrink-0">
-                <SiteStatus site={site} />
+                <SiteStatus site={site} installation={installationOf(site.id)} setup={setupOf(site.id)} />
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between">
@@ -444,17 +468,45 @@ function GroupAssigner({
   return <span className="text-xs text-text-tertiary">&mdash;</span>;
 }
 
-/** Active or inactive, and whether visitors are seeing a published config yet. */
-function SiteStatus({ site }: { site: Site }) {
+/**
+ * Active or inactive, then either setup progress or, once a site is set
+ * up, whether a config is published and whether the banner is installed.
+ */
+function SiteStatus({
+  site,
+  installation,
+  setup,
+}: {
+  site: Site;
+  installation: InstallationSummary | undefined;
+  setup: SiteSetupSummary | undefined;
+}) {
+  // Publishing and installing are setup steps, so their badges would
+  // only repeat what the setup progress already says.
+  const settingUp = setup !== undefined && !setup.complete && !setup.dismissed;
   return (
     <div className="flex flex-wrap gap-1">
       <Badge variant={site.is_active ? 'success' : 'neutral'}>
         {site.is_active ? 'Active' : 'Inactive'}
       </Badge>
-      {!site.live_revision_id && (
-        <Link to={`/sites/${site.id}`} title="Visitors see the built-in defaults until you publish">
-          <Badge variant="warning">Not yet published</Badge>
+      {settingUp ? (
+        <Link to={`/sites/${site.id}`} title="Continue setting up this site">
+          <Badge variant="info">
+            Setup {setup.done} of {setup.total}
+          </Badge>
         </Link>
+      ) : (
+        <>
+          {!site.live_revision_id && (
+            <Link
+              to={`/sites/${site.id}`}
+              title="Visitors see the built-in defaults until you publish"
+            >
+              <Badge variant="warning">Not yet published</Badge>
+            </Link>
+          )}
+          {installation && <InstallationBadge state={installation.state} />}
+        </>
       )}
     </div>
   );

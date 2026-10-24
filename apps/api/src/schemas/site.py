@@ -22,6 +22,10 @@ class SiteCreate(BaseModel):
     display_name: str = Field(min_length=1, max_length=255)
     additional_domains: list[str] | None = None
     site_group_id: uuid.UUID | None = None
+    start_scan: bool = Field(
+        default=True,
+        description="Start the site's first cookie scan as soon as it is created.",
+    )
 
 
 class SiteUpdate(BaseModel):
@@ -156,3 +160,15 @@ class SiteConfigResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SiteInstallResponse(BaseModel):
+    """What a site needs to install the banner."""
+
+    api_base: str | None = Field(
+        description="Where browsers reach the API, or null to use the admin UI's address."
+    )
+    cdn_base: str | None = Field(
+        description="Where the banner scripts are served, or null to use the admin UI's address."
+    )
+    domains: list[str] = Field(description="The domains the banner works on.")

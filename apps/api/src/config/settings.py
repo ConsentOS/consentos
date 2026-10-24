@@ -88,12 +88,13 @@ class Settings(BaseSettings):
     initial_org_name: str = "Default Organisation"
     initial_org_slug: str = "default"
 
-    # CDN — public URL where banner scripts (consent-loader.js,
-    # consent-bundle.js) are hosted. In dev the admin UI dog-foods
-    # the banner so localhost:5173 works for testing; in production
-    # this should be a real CDN URL (CloudFlare Pages, S3+CloudFront,
-    # Cloud CDN, etc.) — see docs for setup.
-    cdn_base_url: str = "http://localhost:5173"
+    # Public addresses used in the install snippet sites paste into their
+    # pages. ``cdn_base_url`` is where consent-loader.js and
+    # consent-bundle.js are served; ``public_api_url`` is where browsers
+    # reach this API. Unset, the admin UI uses its own address for both,
+    # which is right when it serves the banner and proxies the API.
+    cdn_base_url: str | None = None
+    public_api_url: str | None = None
 
     # Scanner service
     scanner_service_url: str = "http://localhost:8001"
@@ -221,6 +222,13 @@ class Settings(BaseSettings):
         """
         source = self.pseudonymisation_secret or self.jwt_secret_key
         return source.encode("utf-8")
+
+
+def configured_base_url(value: str | None) -> str | None:
+    """A configured base URL without its trailing slash, or None if unset."""
+    if value is None:
+        return None
+    return value.strip().rstrip("/") or None
 
 
 @lru_cache(maxsize=1)

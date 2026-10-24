@@ -1,11 +1,14 @@
+import type { ReactNode } from "react";
+
 import { cn } from "../../lib/utils.ts";
 
 interface EmptyStateProps {
   message: string;
   className?: string;
+  action?: ReactNode;
 }
 
-function EmptyState({ message, className }: EmptyStateProps) {
+function EmptyState({ message, className, action }: EmptyStateProps) {
   return (
     <div
       className={cn(
@@ -14,6 +17,7 @@ function EmptyState({ message, className }: EmptyStateProps) {
       )}
     >
       <p className="text-sm text-muted-foreground">{message}</p>
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }

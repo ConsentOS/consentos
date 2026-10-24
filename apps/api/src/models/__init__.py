@@ -20,6 +20,7 @@ from src.models.site_config import SiteConfig
 from src.models.site_config_revision import SiteConfigRevision
 from src.models.site_group import SiteGroup
 from src.models.site_group_config import SiteGroupConfig
+from src.models.site_installation import SiteInstallation
 from src.models.translation import Translation
 from src.models.user import User
 
@@ -48,6 +49,7 @@ __all__ = [
     "SiteConfigRevision",
     "SiteGroup",
     "SiteGroupConfig",
+    "SiteInstallation",
     "Translation",
     "User",
 ]

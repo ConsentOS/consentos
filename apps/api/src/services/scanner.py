@@ -6,8 +6,9 @@ and cookie inventory synchronisation from scan results.
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from croniter import croniter
 from sqlalchemy import func, select
@@ -22,6 +23,8 @@ from src.schemas.scanner import (
     DiffStatus,
     ScanDiffResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def create_scan_job(
@@ -41,6 +44,89 @@ async def create_scan_job(
     db.add(job)
     await db.flush()
     return job
+
+
+class ScanInProgressError(Exception):
+    """The site already has a scan pending or running."""
+
+
+class ScanDispatchError(Exception):
+    """The job was created but could not be handed to the task queue."""
+
+    def __init__(self, job: ScanJob) -> None:
+        super().__init__(f"Could not dispatch scan job {job.id}")
+        self.job = job
+
+
+# A job pending this long was never picked up, and a running job that
+# hasn't recorded progress for this long has lost its worker. Either is
+# superseded by a new scan.
+STALE_PENDING = timedelta(minutes=5)
+STALE_RUNNING = timedelta(minutes=10)
+
+
+def _is_stale(job: ScanJob, now: datetime) -> bool:
+    if job.status == "pending":
+        return job.created_at.replace(tzinfo=UTC) < now - STALE_PENDING
+    return job.updated_at.replace(tzinfo=UTC) < now - STALE_RUNNING
+
+
+async def configured_max_pages(db: AsyncSession, site_id: uuid.UUID) -> int:
+    """The site's configured page limit for a scan."""
+    max_pages = await db.scalar(
+        select(SiteConfig.scan_max_pages).where(SiteConfig.site_id == site_id)
+    )
+    return max_pages or 50
+
+
+async def start_scan(
+    db: AsyncSession,
+    *,
+    site_id: uuid.UUID,
+    trigger: str,
+    max_pages: int,
+) -> ScanJob:
+    """Create a scan job for a site and dispatch it to the task queue.
+
+    Commits, so the worker can see the job as soon as it is dispatched.
+    Raises ``ScanInProgressError`` if a scan is already pending or
+    running, and ``ScanDispatchError`` if the queue is unavailable.
+    """
+    active = await db.execute(
+        select(ScanJob).where(
+            ScanJob.site_id == site_id,
+            ScanJob.status.in_(["pending", "running"]),
+        )
+    )
+    now = datetime.now(UTC)
+    for job in active.scalars().all():
+        if not _is_stale(job, now):
+            raise ScanInProgressError
+        logger.warning("Failing stale %s scan job %s for site %s", job.status, job.id, site_id)
+        await complete_scan_job(
+            db,
+            job,
+            error_message=f"Job was stale ({job.status} too long), superseded by new scan",
+        )
+
+    job = await create_scan_job(db, site_id=site_id, trigger=trigger, max_pages=max_pages)
+    await db.commit()
+
+    try:
+        from src.tasks.scanner import run_scan
+
+        run_scan.delay(str(job.id), str(site_id), max_pages)
+    except Exception as exc:
+        logger.exception("Failed to dispatch scan job %s to Celery", job.id)
+        raise ScanDispatchError(job) from exc
+    return job
+
+
+def apply_scan_progress(job: ScanJob, event: dict) -> None:
+    """Copy a scanner progress event onto the job."""
+    job.pages_scanned = int(event.get("pages_crawled", job.pages_scanned))
+    job.pages_total = int(event.get("pages_total", job.pages_total or 0))
+    job.cookies_found = int(event.get("cookies_found", job.cookies_found))
 
 
 async def start_scan_job(db: AsyncSession, job: ScanJob) -> ScanJob:

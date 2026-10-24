@@ -134,7 +134,7 @@ class TestSiteCRUD:
         async with await _client(mock_app, db) as client:
             resp = await client.post(
                 "/api/v1/sites/",
-                json={"domain": "new-site.com", "display_name": "New Site"},
+                json={"domain": "new-site.com", "display_name": "New Site", "start_scan": False},
                 headers=_auth_headers(),
             )
         assert resp.status_code == 201

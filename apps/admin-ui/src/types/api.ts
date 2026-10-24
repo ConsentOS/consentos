@@ -26,6 +26,7 @@ export interface Site {
   name: string | null;
   display_name: string;
   is_active: boolean;
+  additional_domains: string[] | null;
   site_group_id: string | null;
   /** ``null`` until the site's first publish. */
   live_revision_id: string | null;
@@ -299,11 +300,75 @@ export interface TokenResponse {
   token_type: string;
 }
 
+/** Addresses and domains for a site's install snippet. Null means "use the admin UI's address". */
+export interface SiteInstall {
+  api_base: string | null;
+  cdn_base: string | null;
+  domains: string[];
+}
+
+export type SetupStepKey = 'scan' | 'review' | 'banner' | 'publish' | 'install' | 'verify';
+
+export interface SetupStep {
+  key: SetupStepKey;
+  status: 'todo' | 'in_progress' | 'done';
+  detail: string;
+}
+
+export interface SiteSetup {
+  steps: SetupStep[];
+  done: number;
+  total: number;
+  complete: boolean;
+  dismissed: boolean;
+}
+
+export interface SiteSetupSummary {
+  site_id: string;
+  done: number;
+  total: number;
+  complete: boolean;
+  dismissed: boolean;
+}
+
+export type InstallationState = 'not_detected' | 'installed' | 'problem';
+
+export interface InstallationCheckItem {
+  key: string;
+  label: string;
+  status: 'passed' | 'failed' | 'skipped';
+  severity: 'error' | 'warning';
+  detail: string | null;
+  fix: string | null;
+}
+
+export interface InstallationCheckResult {
+  url: string;
+  checked_at: string;
+  ok: boolean;
+  checks: InstallationCheckItem[];
+}
+
+export interface Installation {
+  state: InstallationState;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  last_seen_url: string | null;
+  last_check_at: string | null;
+  last_check: InstallationCheckResult | null;
+}
+
+export interface InstallationSummary {
+  site_id: string;
+  state: InstallationState;
+  last_seen_at: string | null;
+}
+
 export interface ScanJob {
   id: string;
   site_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
-  trigger: 'manual' | 'scheduled' | 'client_report';
+  trigger: 'manual' | 'initial' | 'scheduled' | 'client_report';
   pages_scanned: number;
   pages_total: number | null;
   cookies_found: number;

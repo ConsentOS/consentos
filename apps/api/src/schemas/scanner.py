@@ -18,6 +18,7 @@ class ScanStatus(StrEnum):
 
 class ScanTrigger(StrEnum):
     MANUAL = "manual"
+    INITIAL = "initial"
     SCHEDULED = "scheduled"
     CLIENT_REPORT = "client_report"
 

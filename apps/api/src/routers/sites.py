@@ -5,22 +5,31 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config.settings import configured_base_url, get_settings
 from src.db import get_db
 from src.models.site import Site
 from src.models.site_config import SiteConfig
 from src.models.site_group import SiteGroup
 from src.schemas.auth import CurrentUser
+from src.schemas.scanner import ScanTrigger
 from src.schemas.site import (
     SiteConfigCreate,
     SiteConfigResponse,
     SiteConfigUpdate,
     SiteCreate,
+    SiteInstallResponse,
     SiteResponse,
     SiteUpdate,
 )
 from src.services.config_layers import get_site_group_id, load_group_defaults, load_org_defaults
 from src.services.config_resolver import orm_to_config_dict, resolve_config
 from src.services.dependencies import require_role
+from src.services.scanner import (
+    ScanDispatchError,
+    complete_scan_job,
+    configured_max_pages,
+    start_scan,
+)
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
@@ -66,8 +75,29 @@ async def create_site(
     db.add(default_config)
     await db.flush()
 
+    if body.start_scan:
+        await _start_first_scan(db, site.id)
+
     await db.refresh(site)
     return site
+
+
+async def _start_first_scan(db: AsyncSession, site_id: uuid.UUID) -> None:
+    """Start a new site's first scan, without failing site creation.
+
+    A job that can't be dispatched is marked failed, so the site shows a
+    failed scan the owner can retry rather than none at all.
+    """
+    try:
+        await start_scan(
+            db,
+            site_id=site_id,
+            trigger=ScanTrigger.INITIAL,
+            max_pages=await configured_max_pages(db, site_id),
+        )
+    except ScanDispatchError as exc:
+        await complete_scan_job(db, exc.job, error_message="The scanner couldn't be started")
+        await db.commit()
 
 
 @router.get("/", response_model=list[SiteResponse])
@@ -96,6 +126,22 @@ async def get_site(
     """Get a specific site by ID."""
     site = await _get_org_site(site_id, current_user.organisation_id, db)
     return site
+
+
+@router.get("/{site_id}/install", response_model=SiteInstallResponse)
+async def get_site_install(
+    site_id: uuid.UUID,
+    current_user: CurrentUser = Depends(require_role("owner", "admin", "editor", "viewer")),
+    db: AsyncSession = Depends(get_db),
+) -> SiteInstallResponse:
+    """The addresses and domains the site's install snippet needs."""
+    site = await _get_org_site(site_id, current_user.organisation_id, db)
+    settings = get_settings()
+    return SiteInstallResponse(
+        api_base=configured_base_url(settings.public_api_url),
+        cdn_base=configured_base_url(settings.cdn_base_url),
+        domains=[site.domain, *(site.additional_domains or [])],
+    )
 
 
 @router.patch("/{site_id}", response_model=SiteResponse)
@@ -246,7 +292,7 @@ async def update_site_config(
     Changes the draft only. Visitors see it once the site is published
     with ``POST /config/sites/{site_id}/publish``.
     """
-    await _get_org_site(site_id, current_user.organisation_id, db)
+    site = await _get_org_site(site_id, current_user.organisation_id, db)
 
     result = await db.execute(select(SiteConfig).where(SiteConfig.site_id == site_id))
     config = result.scalar_one_or_none()
@@ -259,10 +305,21 @@ async def update_site_config(
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(config, field, value)
+    _note_banner_edit(site, update_data)
 
     await db.flush()
     await db.refresh(config)
     return await _editor_response(config, current_user.organisation_id, db)
+
+
+# Saving any of these from the Banner or Categories tab counts as setting
+# up the banner, for the setup checklist.
+BANNER_FIELDS = {"banner_config", "enabled_categories"}
+
+
+def _note_banner_edit(site: Site, changed: dict) -> None:
+    if site.banner_confirmed_at is None and BANNER_FIELDS & changed.keys():
+        site.banner_confirmed_at = datetime.now(UTC)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
